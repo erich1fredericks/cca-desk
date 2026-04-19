@@ -973,6 +973,7 @@ export default function CCADesk() {
   // ── Options state
   const [selectedExpiry,setSelectedExpiry] = useState("Dec-26");
   const [greeksMode,setGreeksMode]         = useState(false);
+  const [showBidAsk,setShowBidAsk]         = useState(false);
   const [tab,setTab]                       = useState(0);
 
   // ── Options spread blotter
@@ -1810,12 +1811,29 @@ export default function CCADesk() {
               </div>
             </div>
 
-            <div className="panel" style={{minWidth:110,display:"flex",flexDirection:"column",justifyContent:"space-between"}}>
+            <div className="panel" style={{minWidth:130,display:"flex",flexDirection:"column",justifyContent:"space-between"}}>
               <div>
                 <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6}}>Display</div>
-                <button className={`gtog${greeksMode?" on":""}`} onClick={()=>setGreeksMode(g=>!g)}>
+                <button className={`gtog${greeksMode?" on":""}`} onClick={()=>setGreeksMode(g=>!g)}
+                  style={{marginBottom:6,display:"block",width:"100%"}}>
                   {greeksMode?"Hide Greeks":"Show Greeks"}
                 </button>
+                <button onClick={()=>setShowBidAsk(b=>!b)} style={{
+                  display:"block",width:"100%",cursor:"pointer",fontSize:8,
+                  letterSpacing:"0.1em",padding:"3px 8px",
+                  border:`1px solid ${showBidAsk?"#34d39955":"#182030"}`,
+                  borderRadius:2,fontFamily:"'IBM Plex Mono',monospace",
+                  background:showBidAsk?"rgba(52,211,153,0.08)":"transparent",
+                  color:showBidAsk?"#34d399":"#475569",
+                  transition:"all 0.15s",
+                }}>
+                  {showBidAsk?"Mid Value":"Bid / Ask"}
+                </button>
+                {showBidAsk&&(
+                  <div style={{fontSize:7,color:"#334155",marginTop:4,lineHeight:1.4}}>
+                    10% half-spread<br/>Bid=mid×0.95<br/>Ask=mid×1.05
+                  </div>
+                )}
               </div>
               <div style={{marginTop:10}}>
                 {[["ITM","#34d399"],["ATM","#38bdf8"],["OTM","#f87171"]].map(([m,c])=>(
@@ -1830,93 +1848,156 @@ export default function CCADesk() {
 
           {/* Chain table */}
           <div style={{overflowX:"auto"}}>
-            <div style={{minWidth: greeksMode?1020:680}}>
-              {/* Col headers */}
+            <div style={{minWidth: greeksMode?980:600}}>
+              {/* Col headers — CALL side | divider | STRIKE+VOL | divider | PUT side */}
               <div style={{
                 display:"grid",
                 gridTemplateColumns: greeksMode
-                  ?"54px 72px 70px 62px 55px 52px 52px 8px 70px 62px 55px 52px 52px"
-                  :"54px 72px 70px 62px 55px 8px 70px 62px 55px",
+                  ?"62px 55px 52px 52px 70px 3px 100px 60px 3px 70px 55px 52px 52px 62px"
+                  :"62px 55px 70px 3px 110px 60px 3px 70px 55px 62px",
                 gap:"0 5px",fontSize:8,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",
-                padding:"4px 8px",borderBottom:"1px solid #182030",marginBottom:2
+                padding:"6px 8px",borderBottom:"2px solid #1a2840",marginBottom:2,
+                position:"sticky",top:0,zIndex:10,background:"#070b10",
               }}>
-                <span style={{color:"#38bdf844"}}>Strike</span>
-                <span style={{color:"#a78bfa88",textAlign:"center"}}>σ(K) / Adj</span>
-                {/* CALLS */}
-                <span style={{color:"#93c5fd",textAlign:"right",fontWeight:700}}>Call $</span>
-                <span style={{color:"#93c5fd66",textAlign:"right"}}>Δ</span>
-                {greeksMode&&<><span style={{color:"#34d39966",textAlign:"right"}}>Γ</span><span style={{color:"#34d39966",textAlign:"right"}}>Θ/d</span><span style={{color:"#34d39966",textAlign:"right"}}>Vega</span></>}
-                {!greeksMode&&<span style={{color:"#34d39966",textAlign:"right"}}>Vega</span>}
-                {/* divider */}
+                {greeksMode&&<><span style={{color:"#93c5fd55",textAlign:"right"}}>Vega</span><span style={{color:"#93c5fd55",textAlign:"right"}}>Θ/d</span><span style={{color:"#93c5fd55",textAlign:"right"}}>Γ</span></>}
+                <span style={{color:"#93c5fd",textAlign:"right",fontWeight:700}}>{showBidAsk?"Bid / Ask":"Call $"}</span>
+                <div style={{textAlign:"right",lineHeight:1.1}}>
+                  <div style={{fontSize:8,color:"#93c5fd66",letterSpacing:"0.08em"}}>Δ</div>
+                  {!greeksMode&&<div style={{fontSize:7,color:"#a78bfa44",letterSpacing:"0.06em"}}>Vol</div>}
+                </div>
+                {!greeksMode&&<span style={{display:"none"}}/>}
                 <span/>
-                {/* PUTS */}
-                <span style={{color:"#fca5a5",textAlign:"right",fontWeight:700}}>Put $</span>
-                <span style={{color:"#fca5a566",textAlign:"right"}}>Δ</span>
-                {greeksMode&&<><span style={{color:"#f8718466",textAlign:"right"}}>Γ</span><span style={{color:"#f8718466",textAlign:"right"}}>Θ/d</span><span style={{color:"#f8718466",textAlign:"right"}}>Vega</span></>}
-                {!greeksMode&&<span style={{color:"#f8718466",textAlign:"right"}}>Vega</span>}
+                <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:8}}>
+                  <span style={{color:"#ffffff99",fontWeight:700}}>Strike</span>
+                  {greeksMode&&<span style={{color:"#a78bfa66",fontSize:7}}>Vol / Adj</span>}
+                </div>
+                {!greeksMode&&<span style={{color:"#a78bfa66",textAlign:"center",fontSize:7}}>Vol / Adj</span>}
+                <span/>
+                <span style={{color:"#fca5a5",textAlign:"left",fontWeight:700}}>{showBidAsk?"Bid / Ask":"Put $"}</span>
+                <div style={{textAlign:"left",lineHeight:1.1}}>
+                  <div style={{fontSize:8,color:"#fca5a566",letterSpacing:"0.08em"}}>Δ</div>
+                  {!greeksMode&&<div style={{fontSize:7,color:"#fca5a533",letterSpacing:"0.06em"}}>Vol</div>}
+                </div>
+                {greeksMode&&<><span style={{color:"#fca5a555",textAlign:"left"}}>Γ</span><span style={{color:"#fca5a555",textAlign:"left"}}>Θ/d</span><span style={{color:"#fca5a555",textAlign:"left"}}>Vega</span></>}
+                {!greeksMode&&<span style={{display:"none"}}/>}
               </div>
 
               {rows.map(row=>{
                 const isATM   = Math.abs(row.K-F)<0.5;
                 const isNear  = Math.abs(row.K-F)<2;
-                const callItm = row.K<F, putItm = row.K>F;
-                const cColor  = isATM?"#38bdf8":callItm?"#34d399":"#64748b";
-                const pColor  = isATM?"#38bdf8":putItm?"#34d399":"#64748b";
-                const cBar    = (row.call/maxCall)*100;
-                const pBar    = (row.put/maxPut)*100;
+                const isEven  = rows.indexOf(row)%2===0;
                 const adj     = perStrikeAdj[row.K]||0;
+                // Bid/ask: 10% wide = ±5% of mid
+                const halfSpread = 0.05;
+                const callBid = row.call * (1 - halfSpread);
+                const callAsk = row.call * (1 + halfSpread);
+                const putBid  = row.put  * (1 - halfSpread);
+                const putAsk  = row.put  * (1 + halfSpread);
+                const fmtP = v => v < 0.005 ? "—" : v.toFixed(2);
                 return (
                   <div key={row.K} className="rh" style={{
                     display:"grid",
                     gridTemplateColumns: greeksMode
-                      ?"54px 72px 70px 62px 55px 52px 52px 8px 70px 62px 55px 52px 52px"
-                      :"54px 72px 70px 62px 55px 8px 70px 62px 55px",
-                    gap:"0 5px",alignItems:"center",padding:"5px 8px",
-                    borderBottom:"1px solid #0a0e14",
-                    background:isATM?"rgba(56,189,248,0.08)":isNear?"rgba(56,189,248,0.02)":"transparent",
-                    borderLeft:isATM?"2px solid #38bdf8":"2px solid transparent",
+                      ?"62px 55px 52px 52px 70px 3px 100px 60px 3px 70px 55px 52px 52px 62px"
+                      :"62px 55px 70px 3px 110px 60px 3px 70px 55px 62px",
+                    gap:"0 5px",alignItems:"center",
+                    padding:isATM?"9px 8px":"5px 8px",
+                    borderBottom:`1px solid ${isATM?"#1e3a5f":"#0f1520"}`,
+                    borderTop:isATM?"1px solid #1e3a5f":"none",
+                    background:isATM
+                      ?"rgba(56,189,248,0.09)"
+                      :isEven?"#0b0f18":"#090c14",
+                    borderLeft:isATM?"3px solid #38bdf8":"3px solid transparent",
                   }}>
-                    <span style={{fontSize:13,fontWeight:700,color:"#ffffff",fontVariantNumeric:"tabular-nums"}}>
-                      {row.K}{isATM&&<span style={{fontSize:7,marginLeft:2,color:"#38bdf8"}}>●</span>}
-                    </span>
 
-                    {/* Vol + per-strike adj */}
+                    {/* ── CALL SIDE (left) ── */}
+                    {greeksMode&&<>
+                      <span style={{fontSize:9,color:"#93c5fd44",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
+                      <span style={{fontSize:9,color:"#93c5fd44",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.cTheta.toFixed(3)}</span>
+                      <span style={{fontSize:9,color:"#93c5fd44",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
+                    </>}
+
+                    {/* Call price — mid or bid/ask */}
+                    {showBidAsk ? (
+                      <div style={{textAlign:"right",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                        <span style={{fontSize:11,fontWeight:600,color:row.call<0.005?"#1e2d3d":"#93c5fd"}}>
+                          {fmtP(callBid)}
+                        </span>
+                        <span style={{fontSize:10,color:"#334155",margin:"0 2px"}}>/</span>
+                        <span style={{fontSize:11,fontWeight:600,color:row.call<0.005?"#1e2d3d":"#93c5fd"}}>
+                          {fmtP(callAsk)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span style={{fontSize:isATM?15:13,fontWeight:600,color:row.call<0.005?"#1e2d3d":"#93c5fd",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
+                        {fmtP(row.call)}
+                      </span>
+                    )}
+
+                    {/* Delta + Vol tightly grouped */}
+                    <div style={{textAlign:"right",lineHeight:1.2}}>
+                      <div style={{fontSize:10,color:"#93c5fd77",fontVariantNumeric:"tabular-nums"}}>
+                        {row.cDelta.toFixed(2)}
+                      </div>
+                      {!greeksMode&&<div style={{fontSize:8,color:"#a78bfa66",fontVariantNumeric:"tabular-nums"}}>
+                        {(row.s*100).toFixed(1)}%
+                      </div>}
+                    </div>
+                    {!greeksMode&&<span style={{display:"none"}}/>}
+
+                    {/* Left divider */}
+                    <div style={{width:1,background:isATM?"#38bdf855":"#182030",alignSelf:"stretch"}}/>
+
+                    {/* ── STRIKE + VOL (centre) ── */}
+                    <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:isATM?17:14,fontWeight:700,color:"#ffffff",fontVariantNumeric:"tabular-nums"}}>
+                        {row.K}
+                      </span>
+                      {isATM&&<span style={{fontSize:8,color:"#38bdf8"}}>●</span>}
+                    </div>
                     <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
                       <span style={{fontSize:9,color:"#a78bfa",fontVariantNumeric:"tabular-nums"}}>{(row.s*100).toFixed(1)}%</span>
-                      <div style={{display:"flex",alignItems:"center",gap:2}}>
-                        <span style={{fontSize:7,color:"#334155"}}>adj</span>
-                        <input className="vadj" type="number" step="0.5" value={adj}
-                          onChange={e=>setPerStrikeAdj(p=>({...p,[row.K]:parseFloat(e.target.value)||0}))}
-                          title="Per-strike vol ±pp"/>
+                      <input className="vadj" type="number" step="0.5" value={adj}
+                        onChange={e=>setPerStrikeAdj(p=>({...p,[row.K]:parseFloat(e.target.value)||0}))}
+                        title="Vol adj ±pp"/>
+                    </div>
+
+                    {/* Right divider */}
+                    <div style={{width:1,background:isATM?"#38bdf855":"#182030",alignSelf:"stretch"}}/>
+
+                    {/* ── PUT SIDE (right) ── */}
+                    {showBidAsk ? (
+                      <div style={{textAlign:"left",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                        <span style={{fontSize:11,fontWeight:600,color:row.put<0.005?"#1e2d3d":"#fca5a5"}}>
+                          {fmtP(putBid)}
+                        </span>
+                        <span style={{fontSize:10,color:"#334155",margin:"0 2px"}}>/</span>
+                        <span style={{fontSize:11,fontWeight:600,color:row.put<0.005?"#1e2d3d":"#fca5a5"}}>
+                          {fmtP(putAsk)}
+                        </span>
                       </div>
-                    </div>
-
-                    {/* Call price */}
-                    <div style={{position:"relative",textAlign:"right"}}>
-                      <div style={{position:"absolute",right:0,top:"50%",transform:"translateY(-50%)",height:3,width:`${cBar}%`,background:"#34d39918",borderRadius:1}}/>
-                      <span style={{fontSize:12,fontWeight:600,color:row.call<0.005?"#1e2d3d":"#93c5fd",position:"relative",fontVariantNumeric:"tabular-nums"}}>
-                        {row.call<0.005?"<0.01":row.call.toFixed(3)}
+                    ) : (
+                      <span style={{fontSize:isATM?15:13,fontWeight:600,color:row.put<0.005?"#1e2d3d":"#fca5a5",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>
+                        {fmtP(row.put)}
                       </span>
-                    </div>
-                    <span style={{fontSize:10,color:"#93c5fd77",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.cDelta.toFixed(3)}</span>
-                    {greeksMode&&<><span style={{fontSize:9,color:"#93c5fd55",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
-                      <span style={{fontSize:9,color:"#93c5fd55",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.cTheta.toFixed(3)}</span></>}
-                    <span style={{fontSize:9,color:"#a78bfa66",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
+                    )}
 
-                    {/* Divider */}
-                    <div style={{width:1,background:"#182030",height:14,alignSelf:"center"}}/>
-
-                    {/* Put price */}
-                    <div style={{position:"relative",textAlign:"right"}}>
-                      <div style={{position:"absolute",right:0,top:"50%",transform:"translateY(-50%)",height:3,width:`${pBar}%`,background:"#f8718418",borderRadius:1}}/>
-                      <span style={{fontSize:12,fontWeight:600,color:row.put<0.005?"#1e2d3d":"#fca5a5",position:"relative",fontVariantNumeric:"tabular-nums"}}>
-                        {row.put<0.005?"<0.01":row.put.toFixed(3)}
-                      </span>
+                    {/* Delta + Vol tightly grouped */}
+                    <div style={{textAlign:"left",lineHeight:1.2}}>
+                      <div style={{fontSize:10,color:"#fca5a577",fontVariantNumeric:"tabular-nums"}}>
+                        {row.pDelta.toFixed(2)}
+                      </div>
+                      {!greeksMode&&<div style={{fontSize:8,color:"#fca5a544",fontVariantNumeric:"tabular-nums"}}>
+                        {(row.s*100).toFixed(1)}%
+                      </div>}
                     </div>
-                    <span style={{fontSize:10,color:"#fca5a577",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.pDelta.toFixed(3)}</span>
-                    {greeksMode&&<><span style={{fontSize:9,color:"#fca5a555",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
-                      <span style={{fontSize:9,color:"#fca5a555",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.pTheta.toFixed(3)}</span></>}
-                    <span style={{fontSize:9,color:"#a78bfa66",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
+
+                    {greeksMode&&<>
+                      <span style={{fontSize:9,color:"#fca5a544",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
+                      <span style={{fontSize:9,color:"#fca5a544",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{row.pTheta.toFixed(3)}</span>
+                      <span style={{fontSize:9,color:"#fca5a544",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
+                    </>}
+                    {!greeksMode&&<span style={{display:"none"}}/>}
                   </div>
                 );
               })}
@@ -1924,7 +2005,7 @@ export default function CCADesk() {
           </div>
           <div style={{marginTop:14,borderTop:"1px solid #182030",paddingTop:9,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,fontSize:8,color:"#1a2840",letterSpacing:"0.06em"}}>
             <span>BS FUTURES OPTIONS - sigma(K)=ATMvol + Skew x ln(K/F) + Convexity x ln(K/F)^2 + adj</span>
-            <span>ATM highlighted - ITM=green - OTM=dim - adj=per-strike pp override</span>
+            <span>ATM highlighted - calls light blue left - puts light red right - strike bold white centre</span>
           </div>
 
           {/* ════ SPREAD BUILDER ════ */}
