@@ -25,6 +25,58 @@ const OPTIONS_EXPIRIES = [
 ];
 
 
+
+// ─── West Power Options Constants ─────────────────────────────────────────────
+const WP_OPT_STRIKES = Array.from({length:21},(x,i)=>i*5); // $0 to $100, $5 increments
+const WP_OPT_HUBS    = ["SP15","NP15","Mid-C","PV"];
+const WP_OPT_COLORS  = ["#38bdf8","#34d399","#fb923c","#a78bfa"];
+
+// On-peak daily lookback option pricing (Asian-style, HE07-HE22 = 16 peak hours)
+// Vol scaling for on-peak arithmetic average:
+//   sigmaEff = sigma * sqrt((peakFrac) * (1/3))
+//   peakFrac = 16/24 (on-peak hours fraction of day)
+//   sqrt(16/24 * 1/3) = sqrt(2/9) ≈ 0.4714
+// This correctly accounts for: (1) only peak hours contribute to settlement,
+// (2) arithmetic averaging reduces effective vol vs European
+const WP_PEAK_FRAC  = 16/24;                         // HE07-HE22
+const WP_VOL_SCALE  = Math.sqrt(WP_PEAK_FRAC * (1/3)); // ~0.4714
+
+function wpDailyCallPrice(F, K, T, r, sigma) {
+  // On-peak Asian call: BS with peak-adjusted vol
+  if(T <= 0 || sigma <= 0) return Math.max(F - K, 0);
+  if(K <= 0) return F * Math.exp(-r*T); // zero strike = forward value
+  const sigmaEff = sigma * WP_VOL_SCALE;
+  const d1 = (Math.log(F/K) + 0.5*sigmaEff*sigmaEff*T) / (sigmaEff*Math.sqrt(T));
+  const d2 = d1 - sigmaEff*Math.sqrt(T);
+  return Math.exp(-r*T) * (F*normCDF(d1) - K*normCDF(d2));
+}
+function wpDailyPutPrice(F, K, T, r, sigma) {
+  if(T <= 0 || sigma <= 0) return Math.max(K - F, 0);
+  if(K <= 0) return 0;
+  const sigmaEff = sigma * WP_VOL_SCALE;
+  const d1 = (Math.log(F/K) + 0.5*sigmaEff*sigmaEff*T) / (sigmaEff*Math.sqrt(T));
+  const d2 = d1 - sigmaEff*Math.sqrt(T);
+  return Math.exp(-r*T) * (K*normCDF(-d2) - F*normCDF(-d1));
+}
+// Monthly settled: standard European BS on monthly on-peak forward price
+function wpMonthlyCallPrice(F, K, T, r, sigma) {
+  if(K <= 0) return F * Math.exp(-r*T);
+  return bsCall(F, K, T, r, sigma);
+}
+function wpMonthlyPutPrice(F, K, T, r, sigma) {
+  if(K <= 0) return 0;
+  return bsPut(F, K, T, r, sigma);
+}
+function wpDelta(F, K, T, r, sigma, isCall, isDaily) {
+  if(K <= 0) return isCall ? Math.exp(-r*0.5) : 0;
+  const s = isDaily ? sigma*WP_VOL_SCALE : sigma;
+  return bsDelta(F, K, T, r, s, isCall);
+}
+function wpVega(F, K, T, r, sigma, isDaily) {
+  const s = isDaily ? sigma*WP_VOL_SCALE : sigma;
+  return bsVega(F, K, T, r, s);
+}
+
 // ─── West Power Constants ──────────────────────────────────────────────────────
 const WP_HUBS     = ["SP15","NP15","Mid-C","PV"];
 const WP_COLORS   = ["#38bdf8","#34d399","#fb923c","#a78bfa"];
@@ -218,6 +270,10 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
       <div style={{display:"flex",justifyContent:"space-between",fontSize:7,color:"#1e2d3d",marginTop:2}}>
         <span>{format?format(min):min}</span><span>{format?format(max):max}</span>
       </div>
+    </svg>
+  );
+}
+
     </div>
   );
 }
@@ -907,6 +963,23 @@ export default function CCADesk() {
     }));
   }
 
+  // ── West Power Options state ──────────────────────────────────────────────────
+  const [wpOptHub,setWpOptHub]           = useState("SP15");
+  const [wpOptType,setWpOptType]         = useState("daily");   // daily | monthly
+  const [wpOptMonth,setWpOptMonth]       = useState("Jan");
+  const [wpOptAtmVol,setWpOptAtmVol]     = useState(0.60);      // 60% typical power vol
+  const [wpOptSkew,setWpOptSkew]         = useState(-0.05);
+  const [wpOptConvexity,setWpOptConvexity] = useState(0.20);
+  const [wpOptPerStrike,setWpOptPerStrike] = useState(
+    Object.fromEntries(WP_OPT_STRIKES.map(k=>[k,0]))
+  );
+
+  function wpOptVol(K, F) {
+    const m = Math.log(K/Math.max(F,0.01));
+    const base = wpOptAtmVol + wpOptSkew*m + wpOptConvexity*m*m;
+    return Math.max(0.01, base + (wpOptPerStrike[K]||0)/100);
+  }
+
   function setQR(i,v){ setQuarterRates(p=>p.map((r,j)=>j===i?v:r)); }
   function commitPrice(v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) setAnchorPrice(n); }
 
@@ -1324,6 +1397,7 @@ export default function CCADesk() {
           {label:"Vol Surface",badge:null},
           {label:"Futures Curve",badge:null},
           {label:"West Power",badge:null},
+          {label:"Power Options",badge:null},
         ].map(({label,badge},i)=>(
           <button key={label} className={`tab-btn${tab===i?" on":""}`} onClick={()=>setTab(i)}
             style={{position:"relative"}}>
@@ -2543,6 +2617,247 @@ export default function CCADesk() {
           </div>
         </div>
       )}
+
+      {/* ════════════ POWER OPTIONS TAB ════════════ */}
+      {tab===6 && (()=>{
+        // Derive forward price for selected hub + month
+        const wpF = getWpPrice(wpOptHub, "monthly", wpOptMonth);
+        // Time to expiry: end of selected month
+        const now2 = new Date();
+        const mIdx = WP_MONTHS_L.indexOf(wpOptMonth);
+        const expYear = mIdx >= now2.getMonth() ? now2.getFullYear() : now2.getFullYear()+1;
+        const lastDay = new Date(expYear, mIdx+1, 0);
+        const wpT = Math.max((lastDay - now2)/(365*24*3600*1000), 0.003);
+        const wpR = baseRate/100;
+
+        // Build option rows
+        const wpRows = WP_OPT_STRIKES.map(K=>{
+          const s = wpOptVol(K, wpF);
+          const dc = wpDailyCallPrice(wpF, K, wpT, wpR, s);
+          const dp = wpDailyPutPrice(wpF, K, wpT, wpR, s);
+          const mc = wpMonthlyCallPrice(wpF, K, wpT, wpR, s);
+          const mp = wpMonthlyPutPrice(wpF, K, wpT, wpR, s);
+          return {
+            K, s,
+            dc, dp, mc, mp,
+            dcDelta: wpDelta(wpF,K,wpT,wpR,s,true,true),
+            dpDelta: wpDelta(wpF,K,wpT,wpR,s,false,true),
+            mcDelta: wpDelta(wpF,K,wpT,wpR,s,true,false),
+            mpDelta: wpDelta(wpF,K,wpT,wpR,s,false,false),
+            vega: wpVega(wpF,K,wpT,wpR,s,wpOptType==="daily"),
+          };
+        });
+        const maxC = Math.max(...wpRows.map(r=>wpOptType==="daily"?r.dc:r.mc), 0.01);
+        const maxP = Math.max(...wpRows.map(r=>wpOptType==="daily"?r.dp:r.mp), 0.01);
+
+        return (
+          <div>
+            {/* Controls row */}
+            <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"stretch"}}>
+
+              {/* Hub + Month + Type */}
+              <div className="panel">
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>Contract</div>
+                <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                  {WP_OPT_HUBS.map((h,i)=>(
+                    <button key={h} onClick={()=>setWpOptHub(h)} style={{
+                      padding:"5px 12px",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,
+                      borderRadius:2,cursor:"pointer",border:"1px solid",letterSpacing:"0.05em",
+                      borderColor:wpOptHub===h?WP_OPT_COLORS[i]:"#182030",
+                      background:wpOptHub===h?`${WP_OPT_COLORS[i]}18`:"transparent",
+                      color:wpOptHub===h?WP_OPT_COLORS[i]:"#475569",transition:"all 0.12s",
+                    }}>{h}</button>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                  {WP_MONTHS_L.map(mo=>(
+                    <button key={mo} onClick={()=>setWpOptMonth(mo)} style={{
+                      padding:"3px 8px",fontFamily:"'IBM Plex Mono',monospace",fontSize:9,
+                      borderRadius:2,cursor:"pointer",border:"1px solid",
+                      borderColor:wpOptMonth===mo?"#38bdf8":"#182030",
+                      background:wpOptMonth===mo?"rgba(56,189,248,0.08)":"transparent",
+                      color:wpOptMonth===mo?"#38bdf8":"#475569",
+                    }}>{mo}</button>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  {[["daily","Daily Lookback"],["monthly","Monthly Settled"]].map(([v,label])=>(
+                    <button key={v} onClick={()=>setWpOptType(v)} style={{
+                      padding:"4px 12px",fontFamily:"'IBM Plex Mono',monospace",fontSize:9,
+                      borderRadius:2,cursor:"pointer",border:"1px solid",letterSpacing:"0.06em",
+                      borderColor:wpOptType===v?"#fb923c":"#182030",
+                      background:wpOptType===v?"rgba(251,146,60,0.08)":"transparent",
+                      color:wpOptType===v?"#fb923c":"#475569",
+                    }}>{label}</button>
+                  ))}
+                </div>
+                <div style={{marginTop:10,fontSize:9,color:"#334155",display:"flex",gap:12}}>
+                  <span>F=<span style={{color:WP_OPT_COLORS[WP_OPT_HUBS.indexOf(wpOptHub)],fontWeight:700}}>${wpF.toFixed(2)}</span></span>
+                  <span>T=<span style={{color:"#34d399"}}>{(wpT*365).toFixed(0)}d</span></span>
+                  <span>Exp=<span style={{color:"#94a3b8"}}>{wpOptMonth} {expYear}</span></span>
+                </div>
+              </div>
+
+              {/* Vol sliders */}
+              <div className="panel" style={{flex:1,minWidth:300}}>
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:12}}>
+                  Volatility Parameters — {wpOptType==="daily"?"On-Peak Daily Lookback (HE07-22, σ×√(16/24÷3))":"Monthly Settled (European BS)"}
+                </div>
+                <VolSlider label="ATM Vol" value={wpOptAtmVol*100} min={5} max={200} step={1}
+                  onChange={v=>setWpOptAtmVol(v/100)} color="#38bdf8"
+                  format={v=>`${v.toFixed(0)}%`} hint="power vol typically 40-150%"/>
+                <VolSlider label="Skew" value={wpOptSkew*100} min={-30} max={15} step={0.5}
+                  onChange={v=>setWpOptSkew(v/100)} color="#fb923c"
+                  format={v=>`${v>=0?"+":""}${v.toFixed(1)}%`} hint="put/call tilt"/>
+                <VolSlider label="Convexity" value={wpOptConvexity*100} min={0} max={80} step={0.5}
+                  onChange={v=>setWpOptConvexity(v/100)} color="#a78bfa"
+                  format={v=>`${v.toFixed(1)}%`} hint="wing curvature"/>
+              </div>
+
+              {/* Vol smile mini chart */}
+              <div className="panel" style={{minWidth:320}}>
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:8}}>
+                  Vol Smile — {wpOptHub} {wpOptMonth}
+                </div>
+                <VolSmileChart
+                  strikes={WP_OPT_STRIKES}
+                  volFn={(K)=>wpOptVol(K,wpF)}
+                  F={wpF}
+                  atmVol={wpOptAtmVol}
+                />
+                <div style={{marginTop:8,display:"flex",gap:16,justifyContent:"center"}}>
+                  {[
+                    {label:"25Δ Put",K:Math.max(5,Math.round(wpF*0.80/5)*5)},
+                    {label:"ATM",K:Math.min(100,Math.max(0,Math.round(wpF/5)*5))},
+                    {label:"25Δ Call",K:Math.min(100,Math.round(wpF*1.20/5)*5)},
+                  ].map(({label,K})=>{
+                    const kc=Math.max(20,Math.min(100,K));
+                    return (
+                      <div key={label} style={{textAlign:"center"}}>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>{label}</div>
+                        <div style={{fontSize:12,fontWeight:600,color:"#a78bfa"}}>{(wpOptVol(kc,wpF)*100).toFixed(0)}%</div>
+                        <div style={{fontSize:8,color:"#334155"}}>K={kc}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Options chain table */}
+            <div style={{overflowX:"auto"}}>
+              <div style={{minWidth:580}}>
+                {/* Sticky header */}
+                <div style={{
+                  position:"sticky",top:0,zIndex:10,
+                  background:"#070b10",borderBottom:"2px solid #1a2840",
+                  display:"grid",
+                  gridTemplateColumns:"90px 90px 3px 130px 70px 3px 90px 90px",
+                  padding:"7px 12px",
+                }}>
+                  <span style={{fontSize:9,color:"#93c5fd",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",paddingRight:8,fontWeight:700}}>CALL</span>
+                  <span style={{fontSize:9,color:"#93c5fd66",textTransform:"uppercase",textAlign:"right",paddingRight:4}}>Delta</span>
+                  <span/>
+                  <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:9,color:"#ffffff99",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
+                    <span style={{fontSize:8,color:"#c4b5fd44",textTransform:"uppercase"}}>Vol%</span>
+                  </div>
+                  <span/>
+                  <span/>
+                  <span style={{fontSize:9,color:"#fca5a5",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"left",paddingLeft:8,fontWeight:700}}>PUT</span>
+                  <span style={{fontSize:9,color:"#fca5a566",textTransform:"uppercase",textAlign:"left",paddingLeft:4}}>Delta</span>
+                </div>
+
+                {/* Per-strike vol adj row header */}
+                <div style={{display:"grid",gridTemplateColumns:"90px 90px 3px 130px 70px 3px 90px 90px",
+                  padding:"3px 12px",borderBottom:"1px solid #182030",background:"#0b0f18"}}>
+                  <span style={{fontSize:7,color:"#334155",textAlign:"right",paddingRight:8}}>price / $/MWh</span>
+                  <span style={{fontSize:7,color:"#334155",textAlign:"right",paddingRight:4}}>Δ</span>
+                  <span/>
+                  <span style={{fontSize:7,color:"#a78bfa66",textAlign:"center"}}>vol adj ±pp →</span>
+                  <span/>
+                  <span/>
+                  <span style={{fontSize:7,color:"#334155",textAlign:"left",paddingLeft:8}}>price / $/MWh</span>
+                  <span style={{fontSize:7,color:"#334155",textAlign:"left",paddingLeft:4}}>Δ</span>
+                </div>
+
+                {wpRows.map((row,idx)=>{
+                  const isATM  = Math.abs(row.K - wpF) < 3;
+                  const isNear = Math.abs(row.K - wpF) < 12;
+                  const callP  = wpOptType==="daily" ? row.dc : row.mc;
+                  const putP   = wpOptType==="daily" ? row.dp : row.mp;
+                  const callD  = wpOptType==="daily" ? row.dcDelta : row.mcDelta;
+                  const putD   = wpOptType==="daily" ? row.dpDelta : row.mpDelta;
+                  const cBar   = (callP/maxC)*100;
+                  const pBar   = (putP/maxP)*100;
+                  const adj    = wpOptPerStrike[row.K]||0;
+                  return (
+                    <div key={row.K} style={{
+                      display:"grid",
+                      gridTemplateColumns:"90px 90px 3px 130px 70px 3px 90px 90px",
+                      padding:isATM?"10px 12px":"5px 12px",
+                      borderBottom:"1px solid",
+                      borderBottomColor:isNear?"#141e2c":"#0b0d10",
+                      background:isATM?"rgba(56,189,248,0.07)":idx%2===0?"transparent":"rgba(255,255,255,0.007)",
+                      borderLeft:isATM?"3px solid #38bdf8":"3px solid transparent",
+                      alignItems:"center",
+                    }}>
+                      {/* Call */}
+                      <div style={{position:"relative",textAlign:"right",paddingRight:8}}>
+                        <div style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",height:3,width:`${cBar}%`,background:"#93c5fd18",borderRadius:1}}/>
+                        <span style={{fontSize:isATM?16:13,fontWeight:600,color:callP<0.01?"#1a2535":"#93c5fd",fontVariantNumeric:"tabular-nums",position:"relative"}}>
+                          {callP<0.01?"—":callP.toFixed(2)}
+                        </span>
+                      </div>
+                      <span style={{fontSize:10,color:"#93c5fd66",textAlign:"right",paddingRight:8,fontVariantNumeric:"tabular-nums"}}>
+                        {callD.toFixed(2)}
+                      </span>
+                      {/* Left divider */}
+                      <div style={{width:1,background:isATM?"#ffffff22":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                      {/* Strike + vol adj */}
+                      <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:isATM?17:14,fontWeight:700,color:"#ffffff",fontVariantNumeric:"tabular-nums"}}>
+                          {row.K}
+                        </span>
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+                          <span style={{fontSize:8,color:"#a78bfa88"}}>{(row.s*100).toFixed(0)}%</span>
+                          <input type="number" step="1" value={adj}
+                            onChange={e=>setWpOptPerStrike(p=>({...p,[row.K]:parseFloat(e.target.value)||0}))}
+                            style={{width:36,background:"#0b0f18",border:"1px solid #a78bfa33",color:"#a78bfa",
+                              fontFamily:"'IBM Plex Mono',monospace",fontSize:9,padding:"1px 3px",
+                              textAlign:"center",outline:"none",borderRadius:2}}/>
+                        </div>
+                      </div>
+                      <span/>
+                      {/* Right divider */}
+                      <div style={{width:1,background:isATM?"#ffffff22":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                      {/* Put */}
+                      <div style={{position:"relative",textAlign:"left",paddingLeft:8}}>
+                        <div style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",height:3,width:`${pBar}%`,background:"#fca5a518",borderRadius:1}}/>
+                        <span style={{fontSize:isATM?16:13,fontWeight:600,color:putP<0.01?"#1a2535":"#fca5a5",fontVariantNumeric:"tabular-nums",position:"relative"}}>
+                          {putP<0.01?"—":putP.toFixed(2)}
+                        </span>
+                      </div>
+                      <span style={{fontSize:10,color:"#fca5a566",textAlign:"left",paddingLeft:4,fontVariantNumeric:"tabular-nums"}}>
+                        {putD.toFixed(2)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{marginTop:12,display:"flex",justifyContent:"space-between",fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
+              <span>
+                {wpOptType==="daily"
+                  ? "On-peak daily lookback (HE07-HE22) — BS with vol scaled by sqrt(16/24 x 1/3) for peak-hour arithmetic avg"
+                  : "Monthly settled — standard European Black-Scholes on monthly forward price"}
+              </span>
+              <span>Strikes $20-$100 in $5 increments — adj = per-strike vol ±pp</span>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
