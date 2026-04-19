@@ -802,14 +802,279 @@ export default function CCADesk() {
       </div>
 
       {/* ── Tab bar */}
-      <div style={{display:"flex",borderBottom:"1px solid #182030",marginBottom:18,gap:0}}>
-        {["Options Chain","Vol Surface","Futures Curve"].map((t,i)=>(
-          <button key={t} className={`tab-btn${tab===i?" on":""}`} onClick={()=>setTab(i)}>{t}</button>
+      <div style={{display:"flex",borderBottom:"1px solid #182030",marginBottom:18,gap:0,flexWrap:"wrap"}}>
+        {[
+          {label:"Market View",badge:"LIVE"},
+          {label:"Blotter View",badge:blotter.length>0?String(blotter.length):null},
+          {label:"Options Chain",badge:null},
+          {label:"Vol Surface",badge:null},
+          {label:"Futures Curve",badge:null},
+        ].map(({label,badge},i)=>(
+          <button key={label} className={`tab-btn${tab===i?" on":""}`} onClick={()=>setTab(i)}
+            style={{position:"relative"}}>
+            {label}
+            {badge&&<span style={{
+              position:"absolute",top:2,right:2,fontSize:6,fontWeight:700,
+              background:i===1?"#34d399":i===0?"#38bdf8":"transparent",
+              color:i===0||i===1?"#070b10":"#38bdf8",
+              padding:"1px 4px",borderRadius:8,letterSpacing:"0.05em"
+            }}>{badge}</span>}
+          </button>
         ))}
       </div>
 
-      {/* ════════════ OPTIONS CHAIN ════════════ */}
+
+      {/* ════════════ MARKET VIEW TAB (read-only clean chain) ════════════ */}
       {tab===0 && (
+        <div>
+          {/* Compact expiry bar */}
+          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:18,flexWrap:"wrap"}}>
+            {OPTIONS_EXPIRIES.map(e=>{
+              const key=`${MONTHS[e.month].slice(0,3)}-${String(e.year).slice(2)}`;
+              const isSel=selectedExpiry===key;
+              const cp=expiryPriceMap[key];
+              return (
+                <button key={key} onClick={()=>setSelectedExpiry(key)} style={{
+                  padding:"6px 14px",fontFamily:"'IBM Plex Mono',monospace",
+                  fontSize:11,fontWeight:isSel?700:400,letterSpacing:"0.06em",
+                  borderRadius:2,cursor:"pointer",border:"1px solid",
+                  borderColor:isSel?"#38bdf8":"#182030",
+                  background:isSel?"rgba(56,189,248,0.10)":"#0b0f18",
+                  color:isSel?"#38bdf8":"#475569",transition:"all 0.12s",
+                  display:"flex",flexDirection:"column",alignItems:"center",gap:2,
+                }}>
+                  <span>{key}</span>
+                  {cp&&<span style={{fontSize:10,color:isSel?"#7dd3fc":"#334155",fontWeight:600}}>${cp.price.toFixed(2)}</span>}
+                </button>
+              );
+            })}
+            <div style={{marginLeft:"auto",display:"flex",gap:16,alignItems:"baseline"}}>
+              <span style={{fontSize:10,color:"#334155"}}>F <span style={{color:"#38bdf8",fontWeight:700,fontSize:14}}>${F.toFixed(2)}</span></span>
+              <span style={{fontSize:10,color:"#334155"}}>T <span style={{color:"#34d399",fontWeight:600}}>{(T*365).toFixed(0)}d</span></span>
+              <span style={{fontSize:10,color:"#334155"}}>ATM vol <span style={{color:"#fb923c",fontWeight:600}}>{(atmVol*100).toFixed(1)}%</span></span>
+              <span style={{fontSize:10,color:"#334155"}}>skew <span style={{color:"#a78bfa",fontWeight:600}}>{skew>=0?"+":""}{(skew*100).toFixed(1)}%</span></span>
+            </div>
+          </div>
+
+          {/* Clean read-only chain */}
+          <div style={{overflowX:"auto"}}>
+            <div style={{minWidth:560}}>
+              {/* Header row */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 3px 120px 90px 80px 3px 120px 90px 80px",
+                gap:"0 0",padding:"8px 12px",borderBottom:"2px solid #182030",marginBottom:0}}>
+                <div style={{display:"grid",gridTemplateColumns:"60px 60px",gap:0}}>
+                  <span style={{fontSize:9,color:"#334155",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
+                  <span style={{fontSize:9,color:"#a78bfa66",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"center"}}>Vol</span>
+                </div>
+                <span/>
+                <span style={{fontSize:9,color:"#34d399",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",fontWeight:600}}>CALL</span>
+                <span style={{fontSize:9,color:"#34d39988",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>Delta</span>
+                <span style={{fontSize:9,color:"#34d39966",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>Vega</span>
+                <span/>
+                <span style={{fontSize:9,color:"#f87171",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",fontWeight:600}}>PUT</span>
+                <span style={{fontSize:9,color:"#f8717188",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>Delta</span>
+                <span style={{fontSize:9,color:"#f8717166",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>Vega</span>
+              </div>
+
+              {rows.map((row,idx)=>{
+                const isATM   = Math.abs(row.K-F)<0.5;
+                const isNear  = Math.abs(row.K-F)<1.5;
+                const callItm = row.K<F;
+                const putItm  = row.K>F;
+                const isEven  = idx%2===0;
+                return (
+                  <div key={row.K} style={{
+                    display:"grid",
+                    gridTemplateColumns:"1fr 3px 120px 90px 80px 3px 120px 90px 80px",
+                    gap:"0 0",
+                    padding:isATM?"10px 12px":"6px 12px",
+                    borderBottom:isATM?"none":"1px solid",
+                    borderBottomColor:isNear?"#182030":"#0d1117",
+                    borderTop:isATM?"2px solid #38bdf822":"none",
+                    borderBottomWidth:isATM?2:1,
+                    borderTopColor:isATM?"#38bdf822":"transparent",
+                    background:isATM?"rgba(56,189,248,0.07)":isEven?"transparent":"rgba(255,255,255,0.008)",
+                    alignItems:"center",
+                  }}>
+                    {/* Strike + vol */}
+                    <div style={{display:"grid",gridTemplateColumns:"60px 60px",gap:0,alignItems:"center"}}>
+                      <span style={{
+                        fontSize:isATM?15:13,fontWeight:isATM?800:callItm||putItm?600:400,
+                        color:isATM?"#38bdf8":callItm?"#94a3b8":putItm?"#94a3b8":"#4a5d70",
+                        fontVariantNumeric:"tabular-nums",letterSpacing:"0.02em"
+                      }}>
+                        {isATM&&<span style={{fontSize:7,marginRight:3,color:"#38bdf8"}}>▶</span>}
+                        {row.K}
+                      </span>
+                      <span style={{fontSize:9,color:"#a78bfa77",textAlign:"center",fontVariantNumeric:"tabular-nums"}}>
+                        {(row.s*100).toFixed(1)}
+                      </span>
+                    </div>
+
+                    {/* Vertical divider */}
+                    <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"2px 8px"}}/>
+
+                    {/* Call */}
+                    <div style={{textAlign:"right",paddingRight:8}}>
+                      <span style={{
+                        fontSize:isATM?15:13,fontWeight:isATM?700:600,
+                        color:row.call<0.005?"#1e2d3d":callItm?"#34d399":isATM?"#7dd3fc":"#4a6070",
+                        fontVariantNumeric:"tabular-nums"
+                      }}>
+                        {row.call<0.005?"—":row.call.toFixed(2)}
+                      </span>
+                    </div>
+                    <span style={{fontSize:isATM?11:10,color:callItm?"#34d39999":"#2d4055",textAlign:"right",fontVariantNumeric:"tabular-nums",paddingRight:4}}>
+                      {row.cDelta.toFixed(2)}
+                    </span>
+                    <span style={{fontSize:9,color:"#1e3050",textAlign:"right",paddingRight:8,fontVariantNumeric:"tabular-nums"}}>
+                      {row.vega.toFixed(2)}
+                    </span>
+
+                    {/* Vertical divider */}
+                    <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"2px 8px"}}/>
+
+                    {/* Put */}
+                    <div style={{textAlign:"right",paddingRight:8}}>
+                      <span style={{
+                        fontSize:isATM?15:13,fontWeight:isATM?700:600,
+                        color:row.put<0.005?"#1e2d3d":putItm?"#f87171":isATM?"#fca5a5":"#4a6070",
+                        fontVariantNumeric:"tabular-nums"
+                      }}>
+                        {row.put<0.005?"—":row.put.toFixed(2)}
+                      </span>
+                    </div>
+                    <span style={{fontSize:isATM?11:10,color:putItm?"#f8717199":"#2d4055",textAlign:"right",fontVariantNumeric:"tabular-nums",paddingRight:4}}>
+                      {row.pDelta.toFixed(2)}
+                    </span>
+                    <span style={{fontSize:9,color:"#1e3050",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
+                      {row.vega.toFixed(2)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{marginTop:12,display:"flex",justifyContent:"space-between",fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
+            <span>Read-only view - edit vol params in Options Chain tab</span>
+            <span>▶ = ATM  |  ITM calls green  |  ITM puts red</span>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════ BLOTTER VIEW TAB ════════════ */}
+      {tab===1 && (
+        <div>
+          {blotter.length===0 ? (
+            <div style={{textAlign:"center",padding:"60px 0",color:"#1e2d3d"}}>
+              <div style={{fontSize:32,marginBottom:12,opacity:0.3}}>◈</div>
+              <div style={{fontSize:11,letterSpacing:"0.12em",color:"#2d3d50"}}>No trades in blotter</div>
+              <div style={{fontSize:9,color:"#182030",marginTop:6}}>Add spreads from the Options Chain tab</div>
+            </div>
+          ) : (
+            <div>
+              {/* Summary bar */}
+              <div style={{display:"flex",gap:0,marginBottom:20,background:"#0b0f18",border:"1px solid #182030",borderRadius:3,overflow:"hidden"}}>
+                {[
+                  {label:"Trades",val:blotter.length,color:"#94a3b8",fmt:v=>v},
+                  {label:"Net Premium",val:blotter.reduce((s,b)=>s+(typeof b.netPrem==="number"?b.netPrem:0),0),color:blotter.reduce((s,b)=>s+(typeof b.netPrem==="number"?b.netPrem:0),0)>=0?"#34d399":"#f87171",fmt:v=>(v>=0?"+":"")+v.toFixed(3)},
+                  {label:"Net Delta",val:blotter.reduce((s,b)=>s+(typeof b.delta==="number"?b.delta:0),0),color:"#38bdf8",fmt:v=>(v>=0?"+":"")+v.toFixed(3)},
+                  {label:"Net Vega",val:blotter.reduce((s,b)=>s+(typeof b.vega==="number"?b.vega:0),0),color:"#a78bfa",fmt:v=>(v>=0?"+":"")+v.toFixed(3)},
+                  {label:"Net Gamma",val:blotter.reduce((s,b)=>s+(typeof b.gamma==="number"?b.gamma:0),0),color:"#fb923c",fmt:v=>(v>=0?"+":"")+v.toFixed(4)},
+                ].map(({label,val,color,fmt},i)=>(
+                  <div key={label} style={{flex:1,padding:"14px 18px",borderRight:i<4?"1px solid #182030":"none"}}>
+                    <div style={{fontSize:8,color:"#334155",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:5}}>{label}</div>
+                    <div style={{fontSize:20,fontWeight:700,color,fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>{fmt(val)}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Trade cards */}
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {blotter.map((b,idx)=>{
+                  const sc=STRAT_COLORS[b.strat]||"#38bdf8";
+                  return (
+                    <div key={b.id} style={{
+                      background:"#0b0f18",border:`1px solid #182030`,borderRadius:3,
+                      borderLeft:`3px solid ${sc}`,padding:"12px 16px",
+                      display:"grid",gridTemplateColumns:"auto 1fr auto",gap:"0 20px",alignItems:"start"
+                    }}>
+                      {/* Left: strategy + time */}
+                      <div style={{minWidth:120}}>
+                        <div style={{fontSize:13,fontWeight:700,color:sc,marginBottom:3,letterSpacing:"0.02em"}}>{b.strat}</div>
+                        <div style={{fontSize:9,color:"#38bdf8",marginBottom:2}}>{b.expiry}</div>
+                        <div style={{fontSize:8,color:"#334155"}}>{b.time}</div>
+                        <div style={{fontSize:9,color:"#475569",marginTop:6}}>
+                          {b.legs.map((l,i)=>(
+                            <div key={i} style={{marginBottom:2}}>
+                              <span style={{color:l.pos.startsWith("+")?sc:"#f87171",fontWeight:600,marginRight:4}}>{l.pos}</span>
+                              <span style={{color:"#94a3b8"}}>{l.type} K{l.K}</span>
+                              <span style={{color:"#475569",marginLeft:6}}>${l.price.toFixed(3)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Middle: key metrics */}
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"0 12px"}}>
+                        {[
+                          {label:"Net Prem",val:b.netPrem,color:typeof b.netPrem==="number"&&b.netPrem>=0?"#34d399":"#f87171",fmt:v=>typeof v==="number"?(v>=0?"+":"")+v.toFixed(3):v},
+                          {label:"Delta",val:b.delta,color:"#38bdf8",fmt:v=>typeof v==="number"?(v>=0?"+":"")+v.toFixed(3):v},
+                          {label:"Vega",val:b.vega,color:"#a78bfa",fmt:v=>typeof v==="number"?(v>=0?"+":"")+v.toFixed(3):v},
+                          {label:"Breakeven",val:b.breakeven,color:"#94a3b8",fmt:v=>v},
+                          {label:"Qty",val:b.qty,color:"#d8e2ef",fmt:v=>v+" lots"},
+                        ].map(({label,val,color,fmt})=>(
+                          <div key={label}>
+                            <div style={{fontSize:7,color:"#334155",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:3}}>{label}</div>
+                            <div style={{fontSize:12,fontWeight:600,color,fontVariantNumeric:"tabular-nums"}}>{fmt(val)}</div>
+                          </div>
+                        ))}
+                        <div style={{gridColumn:"1/-1",marginTop:8,paddingTop:8,borderTop:"1px solid #182030",display:"flex",gap:16}}>
+                          <div>
+                            <span style={{fontSize:7,color:"#334155",marginRight:6}}>MAX PROFIT</span>
+                            <span style={{fontSize:10,color:"#34d399",fontWeight:600}}>
+                              {typeof b.maxProfit==="number"?"+$"+(b.maxProfit*b.qty).toFixed(2):b.maxProfit}
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{fontSize:7,color:"#334155",marginRight:6}}>MAX LOSS</span>
+                            <span style={{fontSize:10,color:"#f87171",fontWeight:600}}>
+                              {typeof b.maxLoss==="number"?"-$"+(b.maxLoss*b.qty).toFixed(2):b.maxLoss}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: remove */}
+                      <button onClick={()=>setBlotter(bl=>bl.filter(x=>x.id!==b.id))}
+                        style={{background:"transparent",border:"1px solid #182030",borderRadius:2,
+                          color:"#334155",fontFamily:"'IBM Plex Mono',monospace",fontSize:8,
+                          padding:"3px 8px",cursor:"pointer",letterSpacing:"0.08em",
+                          transition:"all 0.12s"}}
+                        onMouseEnter={e=>{e.target.style.borderColor="#f87171";e.target.style.color="#f87171";}}
+                        onMouseLeave={e=>{e.target.style.borderColor="#182030";e.target.style.color="#334155";}}>
+                        REMOVE
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{marginTop:14,display:"flex",justifyContent:"flex-end"}}>
+                <button onClick={()=>setBlotter([])}
+                  style={{fontSize:8,color:"#f87171",background:"transparent",border:"1px solid #f8717133",
+                    borderRadius:2,padding:"5px 14px",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace",
+                    letterSpacing:"0.1em"}}>
+                  CLEAR ALL TRADES
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ════════════ OPTIONS CHAIN ════════════ */}
+      {tab===2 && (
         <div>
           <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"stretch"}}>
 
@@ -987,7 +1252,7 @@ export default function CCADesk() {
       )}
 
       {/* ════════════ VOL SURFACE TAB ════════════ */}
-      {tab===1 && (
+      {tab===3 && (
         <div>
           <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:22}}>
             {/* Large vol controls */}
@@ -1072,7 +1337,7 @@ export default function CCADesk() {
       )}
 
       {/* ════════════ FUTURES CURVE TAB ════════════ */}
-      {tab===2 && (
+      {tab===4 && (
         <div>
           {/* ── Rate Sliders + Spread Generator ── */}
           <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap",alignItems:"stretch"}}>
