@@ -22,6 +22,10 @@ const OPTIONS_EXPIRIES = [
   {label:"Jun-27", month:5,  year:2027},
   {label:"Sep-27", month:8,  year:2027},
   {label:"Dec-27", month:11, year:2027},
+  {label:"Mar-28", month:2,  year:2028},
+  {label:"Jun-28", month:5,  year:2028},
+  {label:"Sep-28", month:8,  year:2028},
+  {label:"Dec-28", month:11, year:2028},
 ];
 
 
@@ -168,7 +172,7 @@ function getQuarter(m){ return Math.floor(m/3); }
 
 function buildForwardCurve(anchorPrice, quarterRates, baseRate) {
   // Anchor = Dec-26 (nearest December from today if today < Dec 2026)
-  const dec1Year = 2026, dec2Year = 2027;
+  const dec1Year = 2026, dec2Year = 2028;
   const anchorDate = new Date(dec1Year, 11, 15);
 
   // Start curve at Apr-26
@@ -265,6 +269,28 @@ function VolSmileChart({strikes, volFn, F, atmVol}){
 // ─── Slider control ───────────────────────────────────────────────────────────
 function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", format, hint}){
   const pct = ((value-min)/(max-min)*100).toFixed(1);
+  const dec = () => onChange(Math.max(min, parseFloat((value - step).toFixed(10))));
+  const inc = () => onChange(Math.min(max, parseFloat((value + step).toFixed(10))));
+  const btnStyle = (side) => ({
+    background:"#0b0f18",
+    border:`1px solid ${color}33`,
+    borderRadius:2,
+    color,
+    fontFamily:"'IBM Plex Mono',monospace",
+    fontSize:13,
+    fontWeight:700,
+    width:24,
+    height:24,
+    cursor:"pointer",
+    display:"flex",
+    alignItems:"center",
+    justifyContent:"center",
+    lineHeight:1,
+    flexShrink:0,
+    transition:"all 0.1s",
+    padding:0,
+    userSelect:"none",
+  });
   return (
     <div style={{marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
@@ -276,15 +302,25 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
           {format ? format(value) : value}
         </span>
       </div>
-      <div style={{position:"relative"}}>
+      <div style={{display:"flex",alignItems:"center",gap:6}}>
+        <button onClick={dec} style={btnStyle("left")}
+          onMouseEnter={e=>{e.currentTarget.style.background=`${color}22`;e.currentTarget.style.borderColor=color;}}
+          onMouseLeave={e=>{e.currentTarget.style.background="#0b0f18";e.currentTarget.style.borderColor=`${color}33`;}}>
+          ‹
+        </button>
         <input type="range" min={min} max={max} step={step} value={value}
           onChange={e=>onChange(parseFloat(e.target.value))}
           style={{
-            width:"100%",
+            flex:1,
             background:`linear-gradient(to right, ${color} ${pct}%, #182030 ${pct}%)`,
             accentColor:color,
           }}
         />
+        <button onClick={inc} style={btnStyle("right")}
+          onMouseEnter={e=>{e.currentTarget.style.background=`${color}22`;e.currentTarget.style.borderColor=color;}}
+          onMouseLeave={e=>{e.currentTarget.style.background="#0b0f18";e.currentTarget.style.borderColor=`${color}33`;}}>
+          ›
+        </button>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",fontSize:7,color:"#1e2d3d",marginTop:2}}>
         <span>{format?format(min):min}</span><span>{format?format(max):max}</span>
@@ -1911,44 +1947,119 @@ export default function CCADesk() {
       {/* ════════════ VOL SURFACE TAB ════════════ */}
       {tab===3 && (
         <div>
-          <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:22}}>
-            {/* Large vol controls */}
-            <div className="panel" style={{flex:1,minWidth:320}}>
-              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:14}}>Vol Surface Parameters</div>
+          {/* ── Sticky parameter strip ── */}
+          <div style={{
+            position:"sticky",top:0,zIndex:20,
+            background:"#070b10",
+            borderBottom:"1px solid #182030",
+            paddingBottom:14,paddingTop:6,
+            marginBottom:20,
+          }}>
+            <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:12}}>
+              Vol Surface Parameters — {selectedExpiry} &nbsp;
+              <span style={{color:"#334155",fontWeight:400}}>F={F.toFixed(2)} · T={((activeExp?.T??0.5)*365).toFixed(0)}d</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 24px"}}>
               <VolSlider label="ATM Volatility" value={atmVol*100} min={5} max={120} step={0.25}
                 onChange={v=>setAtmVol(v/100)} color="#38bdf8" format={pctFmt}
-                hint="parallel shift of entire surface"/>
-              <VolSlider label="Skew  (∂σ/∂ln K)" value={skew*100} min={-30} max={15} step={0.25}
+                hint="parallel shift"/>
+              <VolSlider label="Skew" value={skew*100} min={-30} max={15} step={0.25}
                 onChange={v=>setSkew(v/100)} color="#fb923c" format={skewFmt}
-                hint="negative = put vol > call vol (typical CCA)"/>
-              <VolSlider label="Convexity  (∂²σ/∂ln K²)" value={convexity*100} min={0} max={80} step={0.25}
+                hint="put/call tilt"/>
+              <VolSlider label="Convexity" value={convexity*100} min={0} max={80} step={0.25}
                 onChange={v=>setConvexity(v/100)} color="#a78bfa" format={pctFmt}
-                hint="smile curvature / wing steepness"/>
+                hint="wing curvature"/>
             </div>
+          </div>
 
-            {/* Smile chart + stats */}
-            <div className="panel" style={{minWidth:380}}>
-              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
-                Vol Smile — {selectedExpiry} (F={F.toFixed(2)})
+          {/* ── Large smile chart ── */}
+          <div className="panel" style={{marginBottom:20}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase"}}>
+                Vol Smile — {selectedExpiry}
               </div>
-              <VolSmileChart strikes={STRIKES} volFn={volFn} F={F} atmVol={atmVol}/>
-              <div style={{marginTop:10,display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-                {[
-                  {label:"25Δ Put vol", k:Math.round(F*0.90)},
-                  {label:"ATM vol",     k:Math.round(F)},
-                  {label:"25Δ Call vol",k:Math.round(F*1.10)},
-                ].map(({label,k})=>{
+              <div style={{display:"flex",gap:20}}>
+                {[20,25,30,35,40].map(k=>{
                   const kc=Math.max(15,Math.min(50,k));
+                  const v=(volFn(kc)*100).toFixed(1);
+                  const isATMish=Math.abs(kc-F)<2.5;
                   return (
-                    <div key={label} style={{textAlign:"center"}}>
-                      <div style={{fontSize:7,color:"#334155",marginBottom:2,letterSpacing:"0.08em",textTransform:"uppercase"}}>{label}</div>
-                      <div style={{fontSize:14,fontWeight:600,color:"#a78bfa"}}>{(volFn(kc)*100).toFixed(1)}%</div>
-                      <div style={{fontSize:8,color:"#334155"}}>K={kc}</div>
+                    <div key={k} style={{textAlign:"center"}}>
+                      <div style={{fontSize:8,color:isATMish?"#38bdf8":"#475569",letterSpacing:"0.08em",marginBottom:2,fontWeight:isATMish?700:400}}>
+                        K={k}{isATMish?" ●":""}
+                      </div>
+                      <div style={{fontSize:18,fontWeight:700,color:isATMish?"#38bdf8":"#a78bfa",fontFamily:"'IBM Plex Mono',monospace"}}>
+                        {v}<span style={{fontSize:11,color:"#475569"}}>%</span>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             </div>
+            {/* Large SVG chart */}
+            {(()=>{
+              const W=700,H=220,PL=44,PR=16,PT=16,PB=30;
+              const iW=W-PL-PR,iH=H-PT-PB;
+              const allVols=STRIKES.map(k=>volFn(k)*100);
+              const minV=Math.max(0,Math.min(...allVols)-3);
+              const maxV=Math.max(...allVols)+3;
+              const xS=i=>(STRIKES[i]-STRIKES[0])/(STRIKES[STRIKES.length-1]-STRIKES[0])*iW;
+              const yS=v=>iH-(v-minV)/(maxV-minV)*iH;
+              const pts=STRIKES.map((_,i)=>`${PL+xS(i)},${PT+yS(allVols[i])}`).join(" ");
+              const atmX=PL+Math.max(0,Math.min(1,(F-STRIKES[0])/(STRIKES[STRIKES.length-1]-STRIKES[0])))*iW;
+              const liquidStrikes=[20,25,30,35,40];
+              const gridVs=[minV,(minV+maxV)*0.25,(minV+maxV)*0.5,(minV+maxV)*0.75,maxV];
+              return (
+                <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block",overflow:"visible"}}>
+                  {/* Grid lines */}
+                  {gridVs.map((v,i)=>{
+                    const gy=PT+yS(v);
+                    return <g key={i}>
+                      <line x1={PL} y1={gy} x2={PL+iW} y2={gy} stroke="#182030" strokeWidth={0.5}/>
+                      <text x={PL-5} y={gy+3} textAnchor="end" fontSize={9} fill="#334155">{v.toFixed(0)}%</text>
+                    </g>;
+                  })}
+                  {/* Strike axis labels */}
+                  {STRIKES.filter(k=>k%5===0).map(k=>{
+                    const gx=PL+(k-STRIKES[0])/(STRIKES[STRIKES.length-1]-STRIKES[0])*iW;
+                    return <text key={k} x={gx} y={H-6} textAnchor="middle" fontSize={9} fill="#334155">{k}</text>;
+                  })}
+                  {/* ATM line */}
+                  <line x1={atmX} y1={PT} x2={atmX} y2={PT+iH} stroke="#38bdf844" strokeWidth={1} strokeDasharray="4,3"/>
+                  <text x={atmX+4} y={PT+12} fontSize={9} fill="#38bdf8" fontWeight="600">ATM</text>
+                  {/* Area fill */}
+                  <defs>
+                    <linearGradient id="smileG2" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.15"/>
+                      <stop offset="100%" stopColor="#38bdf8" stopOpacity="0"/>
+                    </linearGradient>
+                  </defs>
+                  <polygon
+                    points={`${PL+xS(0)},${PT+iH} ${pts} ${PL+xS(STRIKES.length-1)},${PT+iH}`}
+                    fill="url(#smileG2)"/>
+                  {/* Smile line */}
+                  <polyline points={pts} fill="none" stroke="#38bdf8" strokeWidth={2} strokeLinejoin="round"/>
+                  {/* Liquid strike markers */}
+                  {liquidStrikes.map(k=>{
+                    const ki=STRIKES.indexOf(k);
+                    if(ki<0) return null;
+                    const cx=PL+xS(ki);
+                    const cy=PT+yS(allVols[ki]);
+                    const isATMish=Math.abs(k-F)<2.5;
+                    return <g key={k}>
+                      <line x1={cx} y1={PT} x2={cx} y2={PT+iH} stroke={isATMish?"#38bdf833":"#ffffff11"} strokeWidth={1}/>
+                      <circle cx={cx} cy={cy} r={isATMish?5:4} fill={isATMish?"#38bdf8":"#a78bfa"} stroke="#070b10" strokeWidth={1.5}/>
+                      <text x={cx} y={cy-10} textAnchor="middle" fontSize={10} fill={isATMish?"#38bdf8":"#a78bfa"} fontWeight="700">
+                        {allVols[ki].toFixed(1)}%
+                      </text>
+                      <text x={cx} y={PT+iH+18} textAnchor="middle" fontSize={9} fill={isATMish?"#38bdf8":"#7a8fa6"} fontWeight="600">
+                        {k}
+                      </text>
+                    </g>;
+                  })}
+                </svg>
+              );
+            })()}
           </div>
 
           {/* Per-strike vol adj table */}
@@ -2213,7 +2324,7 @@ export default function CCADesk() {
               );
             })}
             <div style={{marginTop:16,borderTop:"1px solid #182030",paddingTop:9,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
-              <span>F(T) = P_anchor x exp(r x dt) - piecewise quarterly rates - continuous compounding - Apr-26 to Dec-27</span>
+              <span>F(T) = P_anchor x exp(r x dt) - piecewise quarterly rates - continuous compounding - Apr-26 to Dec-28</span>
               <span>Q = quarterly options expiry - anchor = Dec-26</span>
             </div>
           </div>
