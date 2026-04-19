@@ -31,50 +31,69 @@ const WP_OPT_STRIKES = Array.from({length:21},(x,i)=>i*5); // $0 to $100, $5 inc
 const WP_OPT_HUBS    = ["SP15","NP15","Mid-C","PV"];
 const WP_OPT_COLORS  = ["#38bdf8","#34d399","#fb923c","#a78bfa"];
 
-// On-peak daily lookback option pricing (Asian-style, HE07-HE22 = 16 peak hours)
-// Vol scaling for on-peak arithmetic average:
-//   sigmaEff = sigma * sqrt((peakFrac) * (1/3))
-//   peakFrac = 16/24 (on-peak hours fraction of day)
+// ── Bachelier (Normal) model for power options ────────────────────────────────
+// Power prices can go negative, so we use Bachelier (normal) model instead of
+// Black-Scholes (log-normal). In Bachelier, sigma is ABSOLUTE vol in $/MWh.
+//
+// Bachelier call:  C = e^(-rT) * [ (F-K)*N(d) + sigma_n*sqrt(T)*n(d) ]
+// Bachelier put:   P = e^(-rT) * [ (K-F)*N(-d) + sigma_n*sqrt(T)*n(d) ]
+// where d = (F-K) / (sigma_n * sqrt(T))
+//
+// On-peak daily lookback (HE07-HE22, Asian average):
+//   sigma_eff = sigma_n * sqrt(peakFrac * 1/3)
+//   peakFrac = 16/24
 //   sqrt(16/24 * 1/3) = sqrt(2/9) ≈ 0.4714
-// This correctly accounts for: (1) only peak hours contribute to settlement,
-// (2) arithmetic averaging reduces effective vol vs European
-const WP_PEAK_FRAC  = 16/24;                         // HE07-HE22
-const WP_VOL_SCALE  = Math.sqrt(WP_PEAK_FRAC * (1/3)); // ~0.4714
+//
+// Monthly settled: full sigma_n, European Bachelier
+const WP_PEAK_FRAC = 16/24;
+const WP_VOL_SCALE = Math.sqrt(WP_PEAK_FRAC * (1/3)); // ~0.4714
 
-function wpDailyCallPrice(F, K, T, r, sigma) {
-  // On-peak Asian call: BS with peak-adjusted vol
-  if(T <= 0 || sigma <= 0) return Math.max(F - K, 0);
-  if(K <= 0) return F * Math.exp(-r*T); // zero strike = forward value
-  const sigmaEff = sigma * WP_VOL_SCALE;
-  const d1 = (Math.log(F/K) + 0.5*sigmaEff*sigmaEff*T) / (sigmaEff*Math.sqrt(T));
-  const d2 = d1 - sigmaEff*Math.sqrt(T);
-  return Math.exp(-r*T) * (F*normCDF(d1) - K*normCDF(d2));
+function bachelierCall(F, K, T, r, sigmaN) {
+  if(T <= 0) return Math.max(0, F - K);
+  if(sigmaN <= 0) return Math.exp(-r*T) * Math.max(0, F - K);
+  const sT = sigmaN * Math.sqrt(T);
+  const d  = (F - K) / sT;
+  return Math.exp(-r*T) * ((F - K) * normCDF(d) + sT * normPDF(d));
 }
-function wpDailyPutPrice(F, K, T, r, sigma) {
-  if(T <= 0 || sigma <= 0) return Math.max(K - F, 0);
-  if(K <= 0) return 0;
-  const sigmaEff = sigma * WP_VOL_SCALE;
-  const d1 = (Math.log(F/K) + 0.5*sigmaEff*sigmaEff*T) / (sigmaEff*Math.sqrt(T));
-  const d2 = d1 - sigmaEff*Math.sqrt(T);
-  return Math.exp(-r*T) * (K*normCDF(-d2) - F*normCDF(-d1));
+function bachelierPut(F, K, T, r, sigmaN) {
+  if(T <= 0) return Math.max(0, K - F);
+  if(sigmaN <= 0) return Math.exp(-r*T) * Math.max(0, K - F);
+  const sT = sigmaN * Math.sqrt(T);
+  const d  = (F - K) / sT;
+  return Math.exp(-r*T) * ((K - F) * normCDF(-d) + sT * normPDF(d));
 }
-// Monthly settled: standard European BS on monthly on-peak forward price
-function wpMonthlyCallPrice(F, K, T, r, sigma) {
-  if(K <= 0) return F * Math.exp(-r*T);
-  return bsCall(F, K, T, r, sigma);
+function bachelierDelta(F, K, T, r, sigmaN, isCall) {
+  if(T <= 0 || sigmaN <= 0) return isCall ? (F>K?1:0) : (F<K?-1:0);
+  const d = (F - K) / (sigmaN * Math.sqrt(T));
+  return isCall ? Math.exp(-r*T) * normCDF(d) : -Math.exp(-r*T) * normCDF(-d);
 }
-function wpMonthlyPutPrice(F, K, T, r, sigma) {
-  if(K <= 0) return 0;
-  return bsPut(F, K, T, r, sigma);
+function bachelierVega(F, K, T, r, sigmaN) {
+  if(T <= 0 || sigmaN <= 0) return 0;
+  const d = (F - K) / (sigmaN * Math.sqrt(T));
+  return Math.exp(-r*T) * Math.sqrt(T) * normPDF(d);
 }
-function wpDelta(F, K, T, r, sigma, isCall, isDaily) {
-  if(K <= 0) return isCall ? Math.exp(-r*0.5) : 0;
-  const s = isDaily ? sigma*WP_VOL_SCALE : sigma;
-  return bsDelta(F, K, T, r, s, isCall);
+
+// On-peak daily lookback (Asian average, HE07-HE22)
+function wpDailyCallPrice(F, K, T, r, sigmaN) {
+  return bachelierCall(F, K, T, r, sigmaN * WP_VOL_SCALE);
 }
-function wpVega(F, K, T, r, sigma, isDaily) {
-  const s = isDaily ? sigma*WP_VOL_SCALE : sigma;
-  return bsVega(F, K, T, r, s);
+function wpDailyPutPrice(F, K, T, r, sigmaN) {
+  return bachelierPut(F, K, T, r, sigmaN * WP_VOL_SCALE);
+}
+// Monthly settled European Bachelier
+function wpMonthlyCallPrice(F, K, T, r, sigmaN) {
+  return bachelierCall(F, K, T, r, sigmaN);
+}
+function wpMonthlyPutPrice(F, K, T, r, sigmaN) {
+  return bachelierPut(F, K, T, r, sigmaN);
+}
+function wpDelta(F, K, T, r, sigmaN, isCall, isDaily) {
+  const s = isDaily ? sigmaN * WP_VOL_SCALE : sigmaN;
+  return bachelierDelta(F, K, T, r, s, isCall);
+}
+function wpVega(F, K, T, r, sigmaN, isDaily) {
+  const s = isDaily ? sigmaN * WP_VOL_SCALE : sigmaN;
+  return bachelierVega(F, K, T, r, s);
 }
 
 // ─── West Power Constants ──────────────────────────────────────────────────────
@@ -271,10 +290,6 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
         <span>{format?format(min):min}</span><span>{format?format(max):max}</span>
       </div>
     </svg>
-  );
-}
-
-    </div>
   );
 }
 
@@ -967,17 +982,18 @@ export default function CCADesk() {
   const [wpOptHub,setWpOptHub]           = useState("SP15");
   const [wpOptType,setWpOptType]         = useState("daily");   // daily | monthly
   const [wpOptMonth,setWpOptMonth]       = useState("Jan");
-  const [wpOptAtmVol,setWpOptAtmVol]     = useState(0.60);      // 60% typical power vol
-  const [wpOptSkew,setWpOptSkew]         = useState(-0.05);
-  const [wpOptConvexity,setWpOptConvexity] = useState(0.20);
+  const [wpOptAtmVol,setWpOptAtmVol]     = useState(20);        // $20/MWh absolute vol (Bachelier)
+  const [wpOptSkew,setWpOptSkew]         = useState(-0.5);      // $/MWh skew per unit moneyness
+  const [wpOptConvexity,setWpOptConvexity] = useState(0.05);    // $/MWh convexity
   const [wpOptPerStrike,setWpOptPerStrike] = useState(
     Object.fromEntries(WP_OPT_STRIKES.map(k=>[k,0]))
   );
 
   function wpOptVol(K, F) {
-    const m = Math.log(K/Math.max(F,0.01));
+    // Bachelier: absolute vol in $/MWh, linear moneyness (K-F) in $/MWh
+    const m = K - F;
     const base = wpOptAtmVol + wpOptSkew*m + wpOptConvexity*m*m;
-    return Math.max(0.01, base + (wpOptPerStrike[K]||0)/100);
+    return Math.max(0.5, base + (wpOptPerStrike[K]||0));
   }
 
   function setQR(i,v){ setQuarterRates(p=>p.map((r,j)=>j===i?v:r)); }
@@ -2701,17 +2717,17 @@ export default function CCADesk() {
               {/* Vol sliders */}
               <div className="panel" style={{flex:1,minWidth:300}}>
                 <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:12}}>
-                  Volatility Parameters — {wpOptType==="daily"?"On-Peak Daily Lookback (HE07-22, σ×√(16/24÷3))":"Monthly Settled (European BS)"}
+                  Volatility Parameters — {wpOptType==="daily"?"On-Peak Daily Lookback — Bachelier model, σ in $/MWh":"Monthly Settled — Bachelier Normal model"}
                 </div>
-                <VolSlider label="ATM Vol" value={wpOptAtmVol*100} min={5} max={200} step={1}
-                  onChange={v=>setWpOptAtmVol(v/100)} color="#38bdf8"
-                  format={v=>`${v.toFixed(0)}%`} hint="power vol typically 40-150%"/>
-                <VolSlider label="Skew" value={wpOptSkew*100} min={-30} max={15} step={0.5}
-                  onChange={v=>setWpOptSkew(v/100)} color="#fb923c"
-                  format={v=>`${v>=0?"+":""}${v.toFixed(1)}%`} hint="put/call tilt"/>
-                <VolSlider label="Convexity" value={wpOptConvexity*100} min={0} max={80} step={0.5}
-                  onChange={v=>setWpOptConvexity(v/100)} color="#a78bfa"
-                  format={v=>`${v.toFixed(1)}%`} hint="wing curvature"/>
+                <VolSlider label="ATM Vol ($/MWh)" value={wpOptAtmVol} min={1} max={100} step={0.5}
+                  onChange={v=>setWpOptAtmVol(v)} color="#38bdf8"
+                  format={v=>`$${v.toFixed(1)}`} hint="absolute Bachelier vol — typically $10-$40/MWh"/>
+                <VolSlider label="Skew ($/MWh per $)" value={wpOptSkew} min={-5} max={5} step={0.1}
+                  onChange={v=>setWpOptSkew(v)} color="#fb923c"
+                  format={v=>`${v>=0?"+":""}${v.toFixed(2)}`} hint="vol tilt vs moneyness"/>
+                <VolSlider label="Convexity" value={wpOptConvexity} min={0} max={1} step={0.01}
+                  onChange={v=>setWpOptConvexity(v)} color="#a78bfa"
+                  format={v=>`${v.toFixed(3)}`} hint="smile curvature"/>
               </div>
 
               {/* Vol smile mini chart */}
@@ -2721,9 +2737,9 @@ export default function CCADesk() {
                 </div>
                 <VolSmileChart
                   strikes={WP_OPT_STRIKES}
-                  volFn={(K)=>wpOptVol(K,wpF)}
+                  volFn={(K)=>wpOptVol(K,wpF)/Math.max(Math.abs(wpF),5)}
                   F={wpF}
-                  atmVol={wpOptAtmVol}
+                  atmVol={wpOptAtmVol/Math.max(Math.abs(wpF),5)}
                 />
                 <div style={{marginTop:8,display:"flex",gap:16,justifyContent:"center"}}>
                   {[
@@ -2735,7 +2751,7 @@ export default function CCADesk() {
                     return (
                       <div key={label} style={{textAlign:"center"}}>
                         <div style={{fontSize:7,color:"#334155",marginBottom:2}}>{label}</div>
-                        <div style={{fontSize:12,fontWeight:600,color:"#a78bfa"}}>{(wpOptVol(kc,wpF)*100).toFixed(0)}%</div>
+                        <div style={{fontSize:12,fontWeight:600,color:"#a78bfa"}}>${wpOptVol(kc,wpF).toFixed(1)}</div>
                         <div style={{fontSize:8,color:"#334155"}}>K={kc}</div>
                       </div>
                     );
@@ -2820,12 +2836,13 @@ export default function CCADesk() {
                           {row.K}
                         </span>
                         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
-                          <span style={{fontSize:8,color:"#a78bfa88"}}>{(row.s*100).toFixed(0)}%</span>
+                          <span style={{fontSize:8,color:"#a78bfa88"}}>${row.s.toFixed(1)}</span>
                           <input type="number" step="1" value={adj}
                             onChange={e=>setWpOptPerStrike(p=>({...p,[row.K]:parseFloat(e.target.value)||0}))}
                             style={{width:36,background:"#0b0f18",border:"1px solid #a78bfa33",color:"#a78bfa",
                               fontFamily:"'IBM Plex Mono',monospace",fontSize:9,padding:"1px 3px",
-                              textAlign:"center",outline:"none",borderRadius:2}}/>
+                              textAlign:"center",outline:"none",borderRadius:2}}
+                            title="Per-strike vol adj ±$/MWh"/>
                         </div>
                       </div>
                       <span/>
@@ -2850,8 +2867,8 @@ export default function CCADesk() {
             <div style={{marginTop:12,display:"flex",justifyContent:"space-between",fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
               <span>
                 {wpOptType==="daily"
-                  ? "On-peak daily lookback (HE07-HE22) — BS with vol scaled by sqrt(16/24 x 1/3) for peak-hour arithmetic avg"
-                  : "Monthly settled — standard European Black-Scholes on monthly forward price"}
+                  ? "On-peak daily lookback (HE07-HE22) — Bachelier normal model, sigma_eff = sigma x sqrt(16/24 x 1/3) ≈ 0.471"
+                  : "Monthly settled — European Bachelier normal model, handles negative prices"}
               </span>
               <span>Strikes $20-$100 in $5 increments — adj = per-strike vol ±pp</span>
             </div>
