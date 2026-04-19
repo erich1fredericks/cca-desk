@@ -605,8 +605,211 @@ function SpreadBuilder({rows,F,T,r,volFn,sStrat,setSStrat,sExpiry,setSExpiry,
   );
 }
 
+
+// ─── Pop-out Market View ───────────────────────────────────────────────────────
+function PopoutChain() {
+  const params = new URLSearchParams(window.location.search);
+  const anchorPrice  = parseFloat(params.get("ap")||"30");
+  const quarterRates = (params.get("qr")||"5.25,5,4.75,4.5").split(",").map(Number);
+  const baseRate     = parseFloat(params.get("br")||"4.25");
+  const atmVol       = parseFloat(params.get("av")||"0.35");
+  const skew         = parseFloat(params.get("sk")||"-0.08");
+  const convexity    = parseFloat(params.get("cv")||"0.20");
+  const adjStr       = params.get("adj")||"";
+  const perStrikeAdj = {};
+  if(adjStr) adjStr.split(";").forEach(p=>{const [k,v]=p.split(":");perStrikeAdj[parseInt(k)]=parseFloat(v);});
+
+  const [selExp, setSelExp] = useState(params.get("exp")||"Dec-26");
+
+  const curve = useMemo(()=>buildForwardCurve(anchorPrice,quarterRates,baseRate),[]);
+  const today = new Date();
+  const expiryPriceMap = useMemo(()=>{
+    const map={};
+    curve.forEach(c=>{
+      const key=MONTHS[c.month].slice(0,3)+"-"+String(c.year).slice(2);
+      const expDate=new Date(c.year,c.month,15);
+      const T=Math.max((expDate-today)/(365*24*3600*1000),0.003);
+      map[key]={price:c.price,T};
+    });
+    return map;
+  },[curve]);
+
+  const activeExp = expiryPriceMap[selExp]||Object.values(expiryPriceMap)[0];
+  const F = activeExp?.price??anchorPrice;
+  const T = activeExp?.T??0.5;
+  const r = baseRate/100;
+  const volFn = (K)=>strikeVol(K,F,atmVol,skew,convexity,perStrikeAdj[K]);
+
+  const rows = useMemo(()=>STRIKES.map(K=>{
+    const s=volFn(K);
+    return {K,s,
+      call:bsCall(F,K,T,r,s), put:bsPut(F,K,T,r,s),
+      cDelta:bsDelta(F,K,T,r,s,true), pDelta:bsDelta(F,K,T,r,s,false),
+      gamma:bsGamma(F,K,T,r,s), vega:bsVega(F,K,T,r,s)
+    };
+  }),[F,T,r,selExp]);
+
+  const [now,setNow] = useState(new Date());
+  useEffect(()=>{const id=setInterval(()=>setNow(new Date()),60000);return()=>clearInterval(id);},[]);
+
+  return (
+    <div style={{minHeight:"100vh",background:"#070b10",color:"#d8e2ef",
+      fontFamily:"'IBM Plex Mono','Courier New',monospace",padding:"16px 20px"}}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap');
+        *{box-sizing:border-box;}
+        .exp-po{cursor:pointer;padding:5px 12px;font-size:11px;font-family:'IBM Plex Mono',monospace;
+          letter-spacing:0.06em;border-radius:2px;border:1px solid;transition:all 0.12s;
+          display:flex;flex-direction:column;align-items:center;gap:1px;}
+      `}</style>
+
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,
+        borderBottom:"1px solid #182030",paddingBottom:10}}>
+        <div style={{display:"flex",alignItems:"baseline",gap:12}}>
+          <span style={{fontSize:9,letterSpacing:"0.2em",color:"#2d3d50",textTransform:"uppercase"}}>CCA</span>
+          <span style={{fontSize:18,fontWeight:700,color:"#f0f4fa",fontFamily:"'IBM Plex Mono',monospace"}}>
+            Market View
+          </span>
+          <span style={{fontSize:9,color:"#1e2d3d",letterSpacing:"0.1em"}}>{selExp}</span>
+        </div>
+        <div style={{display:"flex",gap:18,alignItems:"baseline"}}>
+          <span style={{fontSize:10,color:"#334155"}}>
+            F <span style={{color:"#38bdf8",fontWeight:700,fontSize:15}}>${F.toFixed(2)}</span>
+          </span>
+          <span style={{fontSize:10,color:"#334155"}}>
+            <span style={{color:"#34d399",fontWeight:600}}>{(T*365).toFixed(0)}d</span>
+          </span>
+          <span style={{fontSize:10,color:"#334155"}}>
+            ATM <span style={{color:"#fb923c",fontWeight:600}}>{(atmVol*100).toFixed(1)}%</span>
+          </span>
+          <span style={{fontSize:10,color:"#334155"}}>
+            skew <span style={{color:"#a78bfa",fontWeight:600}}>{skew>=0?"+":""}{(skew*100).toFixed(1)}%</span>
+          </span>
+          <span style={{fontSize:9,color:"#1e2d3d"}}>
+            {now.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"})}
+          </span>
+        </div>
+      </div>
+
+      {/* Expiry selector */}
+      <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+        {OPTIONS_EXPIRIES.map(e=>{
+          const key=MONTHS[e.month].slice(0,3)+"-"+String(e.year).slice(2);
+          const isSel=selExp===key;
+          const cp=expiryPriceMap[key];
+          return (
+            <button key={key} className="exp-po" onClick={()=>setSelExp(key)} style={{
+              borderColor:isSel?"#38bdf8":"#182030",
+              background:isSel?"rgba(56,189,248,0.10)":"#0b0f18",
+              color:isSel?"#38bdf8":"#475569",fontWeight:isSel?700:400,
+            }}>
+              <span>{key}</span>
+              {cp&&<span style={{fontSize:10,color:isSel?"#7dd3fc":"#2d3d50",fontWeight:600}}>${cp.price.toFixed(2)}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Chain */}
+      <div style={{overflowX:"auto"}}>
+        <div style={{minWidth:520}}>
+          <div style={{display:"grid",gridTemplateColumns:"120px 3px 130px 100px 90px 3px 130px 100px 90px",
+            padding:"6px 10px",borderBottom:"2px solid #1a2840",marginBottom:0}}>
+            <div style={{display:"grid",gridTemplateColumns:"60px 56px"}}>
+              <span style={{fontSize:8,color:"#2d3d50",letterSpacing:"0.14em",textTransform:"uppercase"}}>Strike</span>
+              <span style={{fontSize:8,color:"#a78bfa44",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"center"}}>Vol%</span>
+            </div>
+            <span/>
+            <span style={{fontSize:9,color:"#34d399",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",fontWeight:700}}>CALL</span>
+            <span style={{fontSize:8,color:"#34d39988",textTransform:"uppercase",textAlign:"right"}}>Delta</span>
+            <span style={{fontSize:8,color:"#34d39944",textTransform:"uppercase",textAlign:"right"}}>Vega</span>
+            <span/>
+            <span style={{fontSize:9,color:"#f87171",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",fontWeight:700}}>PUT</span>
+            <span style={{fontSize:8,color:"#f8717188",textTransform:"uppercase",textAlign:"right"}}>Delta</span>
+            <span style={{fontSize:8,color:"#f8717144",textTransform:"uppercase",textAlign:"right"}}>Vega</span>
+          </div>
+
+          {rows.map((row,idx)=>{
+            const isATM  = Math.abs(row.K-F)<0.5;
+            const isNear = Math.abs(row.K-F)<2;
+            const cItm   = row.K<F, pItm=row.K>F;
+            return (
+              <div key={row.K} style={{
+                display:"grid",
+                gridTemplateColumns:"120px 3px 130px 100px 90px 3px 130px 100px 90px",
+                padding:isATM?"11px 10px":"5px 10px",
+                borderBottom:"1px solid",
+                borderBottomColor:isNear?"#141e2c":"#0b0e14",
+                background:isATM?"rgba(56,189,248,0.08)":idx%2===0?"transparent":"rgba(255,255,255,0.007)",
+                borderLeft:isATM?"3px solid #38bdf8":"3px solid transparent",
+                alignItems:"center",
+                transition:"background 0.1s",
+              }}>
+                <div style={{display:"grid",gridTemplateColumns:"60px 56px",alignItems:"center"}}>
+                  <span style={{
+                    fontSize:isATM?17:14,fontWeight:isATM?800:cItm||pItm?600:400,
+                    color:isATM?"#38bdf8":cItm?"#94a3b8":pItm?"#94a3b8":"#3a4d5e",
+                    fontVariantNumeric:"tabular-nums"
+                  }}>
+                    {row.K}
+                  </span>
+                  <span style={{fontSize:9,color:"#a78bfa55",textAlign:"center",fontVariantNumeric:"tabular-nums"}}>
+                    {(row.s*100).toFixed(1)}
+                  </span>
+                </div>
+                <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"2px 6px"}}/>
+                <div style={{textAlign:"right",paddingRight:10}}>
+                  <span style={{
+                    fontSize:isATM?17:14,fontWeight:isATM?700:600,
+                    color:row.call<0.005?"#1a2535":cItm?"#34d399":isATM?"#7dd3fc":"#2d4a5e",
+                    fontVariantNumeric:"tabular-nums"
+                  }}>
+                    {row.call<0.005?"—":row.call.toFixed(2)}
+                  </span>
+                </div>
+                <span style={{fontSize:isATM?12:11,color:cItm?"#34d39988":"#1e3045",textAlign:"right",fontVariantNumeric:"tabular-nums",paddingRight:6}}>
+                  {row.cDelta.toFixed(2)}
+                </span>
+                <span style={{fontSize:9,color:"#162030",textAlign:"right",paddingRight:8,fontVariantNumeric:"tabular-nums"}}>
+                  {row.vega.toFixed(2)}
+                </span>
+                <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"2px 6px"}}/>
+                <div style={{textAlign:"right",paddingRight:10}}>
+                  <span style={{
+                    fontSize:isATM?17:14,fontWeight:isATM?700:600,
+                    color:row.put<0.005?"#1a2535":pItm?"#f87171":isATM?"#fca5a5":"#2d4a5e",
+                    fontVariantNumeric:"tabular-nums"
+                  }}>
+                    {row.put<0.005?"—":row.put.toFixed(2)}
+                  </span>
+                </div>
+                <span style={{fontSize:isATM?12:11,color:pItm?"#f8717188":"#1e3045",textAlign:"right",fontVariantNumeric:"tabular-nums",paddingRight:6}}>
+                  {row.pDelta.toFixed(2)}
+                </span>
+                <span style={{fontSize:9,color:"#162030",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
+                  {row.vega.toFixed(2)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{marginTop:10,display:"flex",justifyContent:"space-between",fontSize:8,color:"#182030"}}>
+        <span>BS Futures Options - CCA Desk</span>
+        <span>ITM calls ▶ green   ITM puts ▶ red   ATM ▶ highlighted row</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function CCADesk() {
+  // ── Detect pop-out mode ──────────────────────────────────────────────────────
+  const isPopout = new URLSearchParams(window.location.search).get("popout")==="1";
+  if(isPopout) return <PopoutChain/>;
+
   // ── Futures state
   const [anchorPrice,setAnchorPrice] = useState(30.00);
   const [priceInput,setPriceInput]   = useState("30.00");
@@ -848,11 +1051,35 @@ export default function CCADesk() {
                 </button>
               );
             })}
-            <div style={{marginLeft:"auto",display:"flex",gap:16,alignItems:"baseline"}}>
+            <div style={{marginLeft:"auto",display:"flex",gap:16,alignItems:"center"}}>
               <span style={{fontSize:10,color:"#334155"}}>F <span style={{color:"#38bdf8",fontWeight:700,fontSize:14}}>${F.toFixed(2)}</span></span>
               <span style={{fontSize:10,color:"#334155"}}>T <span style={{color:"#34d399",fontWeight:600}}>{(T*365).toFixed(0)}d</span></span>
               <span style={{fontSize:10,color:"#334155"}}>ATM vol <span style={{color:"#fb923c",fontWeight:600}}>{(atmVol*100).toFixed(1)}%</span></span>
               <span style={{fontSize:10,color:"#334155"}}>skew <span style={{color:"#a78bfa",fontWeight:600}}>{skew>=0?"+":""}{(skew*100).toFixed(1)}%</span></span>
+              <button onClick={()=>{
+                const adjStr=STRIKES.filter(k=>perStrikeAdj[k]!==0).map(k=>k+":"+perStrikeAdj[k]).join(";");
+                const p=new URLSearchParams({
+                  popout:"1",
+                  ap:anchorPrice,
+                  qr:quarterRates.join(","),
+                  br:baseRate,
+                  av:atmVol,
+                  sk:skew,
+                  cv:convexity,
+                  exp:selectedExpiry,
+                  ...(adjStr?{adj:adjStr}:{})
+                });
+                window.open("?"+p.toString(),"_blank","width=900,height=820,toolbar=0,menubar=0,location=0");
+              }} style={{
+                background:"transparent",border:"1px solid #38bdf844",borderRadius:2,
+                color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontSize:9,
+                padding:"4px 10px",cursor:"pointer",letterSpacing:"0.1em",
+                display:"flex",alignItems:"center",gap:5,transition:"all 0.15s",
+              }}
+              onMouseEnter={e=>{e.currentTarget.style.background="rgba(56,189,248,0.08)";e.currentTarget.style.borderColor="#38bdf8";}}
+              onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="#38bdf844";}}>
+                <span style={{fontSize:11}}>⤢</span> POP OUT
+              </button>
             </div>
           </div>
 
