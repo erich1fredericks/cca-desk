@@ -2415,7 +2415,7 @@ export default function CCADesk() {
                 ))}
 
                 {/* Cal Year rows */}
-                {wpActiveType==="cal"&&WP_CAL_YEARS.map((y,idx)=>(
+                {wpActiveType==="cal"&&wpCalYears.map((y,idx)=>(
                   <div key={y} style={{display:"grid",gridTemplateColumns:`120px repeat(${WP_HUBS.length},1fr)`,
                     gap:"0 8px",padding:"9px 8px",borderBottom:"1px solid #0a0e14",
                     background:idx%2===0?"transparent":"rgba(255,255,255,0.007)",alignItems:"center"}}>
