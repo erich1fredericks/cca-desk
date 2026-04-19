@@ -902,6 +902,18 @@ function PopoutChain() {
   );
 }
 
+
+// ─── localStorage persistence helpers ────────────────────────────────────────
+function lsGet(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    return v !== null ? JSON.parse(v) : fallback;
+  } catch(e) { return fallback; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function CCADesk() {
   // ── Detect pop-out mode ──────────────────────────────────────────────────────
@@ -909,17 +921,17 @@ export default function CCADesk() {
   if(isPopout) return <PopoutChain/>;
 
   // ── Futures state
-  const [anchorPrice,setAnchorPrice] = useState(30.00);
-  const [priceInput,setPriceInput]   = useState("30.00");
-  const [quarterRates,setQuarterRates] = useState([5.25,5.00,4.75,4.50]);
-  const [baseRate,setBaseRate]         = useState(4.25);
+  const [anchorPrice,setAnchorPrice] = useState(()=>lsGet('cca_anchorPrice',30.00));
+  const [priceInput,setPriceInput]   = useState(()=>String(lsGet('cca_anchorPrice',30.00)));
+  const [quarterRates,setQuarterRates] = useState(()=>lsGet('cca_quarterRates',[5.25,5.00,4.75,4.50]));
+  const [baseRate,setBaseRate]         = useState(()=>lsGet('cca_baseRate',4.25));
 
   // ── Vol surface state
-  const [atmVol,setAtmVol]       = useState(0.35);   // 35%
-  const [skew,setSkew]           = useState(-0.08);  // negative = put skew (typical for carbon)
-  const [convexity,setConvexity] = useState(0.20);   // smile curvature
+  const [atmVol,setAtmVol]       = useState(()=>lsGet('cca_atmVol',0.35));
+  const [skew,setSkew]           = useState(()=>lsGet('cca_skew',-0.08));
+  const [convexity,setConvexity] = useState(()=>lsGet('cca_convexity',0.20));
   const [perStrikeAdj,setPerStrikeAdj] = useState(
-    Object.fromEntries(STRIKES.map(k=>[k,0]))
+    ()=>lsGet('cca_perStrikeAdj',Object.fromEntries(STRIKES.map(k=>[k,0])))
   );
 
   // ── Options state
@@ -943,8 +955,8 @@ export default function CCADesk() {
 
   // ── West Power state ──────────────────────────────────────────────────────────
   const wpCalYears = [new Date().getFullYear(), new Date().getFullYear()+1];
-  const [wpSP15,setWpSP15]           = useState(WP_INIT_SP15);
-  const [wpSpreads,setWpSpreads]     = useState(WP_INIT_SPREADS);
+  const [wpSP15,setWpSP15]           = useState(()=>lsGet('wp_sp15',WP_INIT_SP15));
+  const [wpSpreads,setWpSpreads]     = useState(()=>lsGet('wp_spreads',WP_INIT_SPREADS));
   const [wpActiveHub,setWpActiveHub] = useState("SP15");
   const [wpActiveType,setWpActiveType] = useState("monthly");
   const [wpFutBlotter,setWpFutBlotter] = useState([]);
@@ -982,11 +994,11 @@ export default function CCADesk() {
   const [wpOptHub,setWpOptHub]           = useState("SP15");
   const [wpOptType,setWpOptType]         = useState("daily");   // daily | monthly
   const [wpOptMonth,setWpOptMonth]       = useState("Jan");
-  const [wpOptAtmVol,setWpOptAtmVol]     = useState(20);        // $20/MWh absolute vol (Bachelier)
-  const [wpOptSkew,setWpOptSkew]         = useState(-0.5);      // $/MWh skew per unit moneyness
-  const [wpOptConvexity,setWpOptConvexity] = useState(0.05);    // $/MWh convexity
+  const [wpOptAtmVol,setWpOptAtmVol]     = useState(()=>lsGet('wp_optAtmVol',20));
+  const [wpOptSkew,setWpOptSkew]         = useState(()=>lsGet('wp_optSkew',-0.5));
+  const [wpOptConvexity,setWpOptConvexity] = useState(()=>lsGet('wp_optConvexity',0.05));
   const [wpOptPerStrike,setWpOptPerStrike] = useState(
-    Object.fromEntries(WP_OPT_STRIKES.map(k=>[k,0]))
+    ()=>lsGet('wp_optPerStrike',Object.fromEntries(WP_OPT_STRIKES.map(k=>[k,0])))
   );
 
   function wpOptVol(K, F) {
@@ -995,6 +1007,21 @@ export default function CCADesk() {
     const base = wpOptAtmVol + wpOptSkew*m + wpOptConvexity*m*m;
     return Math.max(0.5, base + (wpOptPerStrike[K]||0));
   }
+
+  // ── Persist all pricing state to localStorage ────────────────────────────────
+  useEffect(()=>{ lsSet('cca_anchorPrice',  anchorPrice);  }, [anchorPrice]);
+  useEffect(()=>{ lsSet('cca_quarterRates', quarterRates); }, [quarterRates]);
+  useEffect(()=>{ lsSet('cca_baseRate',     baseRate);     }, [baseRate]);
+  useEffect(()=>{ lsSet('cca_atmVol',       atmVol);       }, [atmVol]);
+  useEffect(()=>{ lsSet('cca_skew',         skew);         }, [skew]);
+  useEffect(()=>{ lsSet('cca_convexity',    convexity);    }, [convexity]);
+  useEffect(()=>{ lsSet('cca_perStrikeAdj', perStrikeAdj); }, [perStrikeAdj]);
+  useEffect(()=>{ lsSet('wp_sp15',          wpSP15);       }, [wpSP15]);
+  useEffect(()=>{ lsSet('wp_spreads',       wpSpreads);    }, [wpSpreads]);
+  useEffect(()=>{ lsSet('wp_optAtmVol',     wpOptAtmVol);  }, [wpOptAtmVol]);
+  useEffect(()=>{ lsSet('wp_optSkew',       wpOptSkew);    }, [wpOptSkew]);
+  useEffect(()=>{ lsSet('wp_optConvexity',  wpOptConvexity);}, [wpOptConvexity]);
+  useEffect(()=>{ lsSet('wp_optPerStrike',  wpOptPerStrike);}, [wpOptPerStrike]);
 
   function setQR(i,v){ setQuarterRates(p=>p.map((r,j)=>j===i?v:r)); }
   function commitPrice(v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) setAnchorPrice(n); }
