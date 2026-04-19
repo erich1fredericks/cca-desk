@@ -727,22 +727,21 @@ function PopoutChain() {
             gridTemplateColumns:"100px 90px 3px 140px 3px 90px 100px",
             padding:"7px 10px",
           }}>
-            <span style={{fontSize:9,color:"#34d399",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",paddingRight:8,fontWeight:700}}>CALL</span>
-            <span style={{fontSize:8,color:"#34d39988",textTransform:"uppercase",textAlign:"right",paddingRight:6}}>Delta</span>
+            <span style={{fontSize:9,color:"#93c5fd",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",paddingRight:8,fontWeight:700}}>CALL</span>
+            <span style={{fontSize:8,color:"#93c5fd66",textTransform:"uppercase",textAlign:"right",paddingRight:6}}>Delta</span>
             <span/>
             <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:10}}>
-              <span style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
-              <span style={{fontSize:8,color:"#a78bfa44",letterSpacing:"0.08em",textTransform:"uppercase"}}>Vol%</span>
+              <span style={{fontSize:9,color:"#ffffff99",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
+              <span style={{fontSize:8,color:"#c4b5fd44",letterSpacing:"0.08em",textTransform:"uppercase"}}>Vol%</span>
             </div>
             <span/>
-            <span style={{fontSize:8,color:"#f8717188",textTransform:"uppercase",textAlign:"left",paddingLeft:6}}>Delta</span>
-            <span style={{fontSize:9,color:"#f87171",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"left",paddingLeft:8,fontWeight:700}}>PUT</span>
+            <span style={{fontSize:8,color:"#fca5a566",textTransform:"uppercase",textAlign:"left",paddingLeft:6}}>Delta</span>
+            <span style={{fontSize:9,color:"#fca5a5",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"left",paddingLeft:8,fontWeight:700}}>PUT</span>
           </div>
 
           {rows.map((row,idx)=>{
             const isATM  = Math.abs(row.K-F)<0.5;
             const isNear = Math.abs(row.K-F)<2;
-            const cItm   = row.K<F, pItm=row.K>F;
             return (
               <div key={row.K} style={{
                 display:"grid",
@@ -750,51 +749,51 @@ function PopoutChain() {
                 padding:isATM?"11px 10px":"5px 10px",
                 borderBottom:"1px solid",
                 borderBottomColor:isNear?"#141e2c":"#0b0e14",
-                background:isATM?"rgba(56,189,248,0.08)":idx%2===0?"transparent":"rgba(255,255,255,0.007)",
+                background:isATM?"rgba(56,189,248,0.06)":idx%2===0?"transparent":"rgba(255,255,255,0.007)",
                 borderLeft:isATM?"3px solid #38bdf8":"3px solid transparent",
                 alignItems:"center",
                 transition:"background 0.1s",
               }}>
-                {/* Call price */}
+                {/* Call price — light blue */}
                 <div style={{textAlign:"right",paddingRight:8}}>
                   <span style={{
-                    fontSize:isATM?17:14,fontWeight:isATM?700:600,
-                    color:row.call<0.005?"#1a2535":cItm?"#34d399":isATM?"#7dd3fc":"#2d4a5e",
+                    fontSize:isATM?17:14,fontWeight:600,
+                    color:row.call<0.005?"#1a2535":"#93c5fd",
                     fontVariantNumeric:"tabular-nums"
                   }}>
                     {row.call<0.005?"—":row.call.toFixed(2)}
                   </span>
                 </div>
                 {/* Call delta */}
-                <span style={{fontSize:isATM?12:11,color:cItm?"#34d39988":"#1e3045",textAlign:"right",paddingRight:10,fontVariantNumeric:"tabular-nums"}}>
+                <span style={{fontSize:isATM?11:10,color:"#93c5fd66",textAlign:"right",paddingRight:10,fontVariantNumeric:"tabular-nums"}}>
                   {row.cDelta.toFixed(2)}
                 </span>
                 {/* Left divider */}
-                <div style={{width:1,background:isATM?"#38bdf833":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
-                {/* Strike + vol CENTRE */}
+                <div style={{width:1,background:isATM?"#ffffff22":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                {/* Strike — bold white */}
                 <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:12}}>
                   <span style={{
-                    fontSize:isATM?18:15,fontWeight:isATM?800:500,
-                    color:isATM?"#38bdf8":"#4a5d70",
+                    fontSize:isATM?19:15,fontWeight:700,
+                    color:"#ffffff",
                     fontVariantNumeric:"tabular-nums"
                   }}>
                     {row.K}
                   </span>
-                  <span style={{fontSize:9,color:"#a78bfa55",fontVariantNumeric:"tabular-nums"}}>
+                  <span style={{fontSize:9,color:"#c4b5fd55",fontVariantNumeric:"tabular-nums"}}>
                     {(row.s*100).toFixed(1)}
                   </span>
                 </div>
                 {/* Right divider */}
-                <div style={{width:1,background:isATM?"#38bdf833":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                <div style={{width:1,background:isATM?"#ffffff22":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
                 {/* Put delta */}
-                <span style={{fontSize:isATM?12:11,color:pItm?"#f8717188":"#1e3045",textAlign:"left",paddingLeft:8,fontVariantNumeric:"tabular-nums"}}>
+                <span style={{fontSize:isATM?11:10,color:"#fca5a566",textAlign:"left",paddingLeft:8,fontVariantNumeric:"tabular-nums"}}>
                   {row.pDelta.toFixed(2)}
                 </span>
-                {/* Put price */}
+                {/* Put price — light red */}
                 <div style={{textAlign:"left",paddingLeft:8}}>
                   <span style={{
-                    fontSize:isATM?17:14,fontWeight:isATM?700:600,
-                    color:row.put<0.005?"#1a2535":pItm?"#f87171":isATM?"#fca5a5":"#2d4a5e",
+                    fontSize:isATM?17:14,fontWeight:600,
+                    color:row.put<0.005?"#1a2535":"#fca5a5",
                     fontVariantNumeric:"tabular-nums"
                   }}>
                     {row.put<0.005?"—":row.put.toFixed(2)}
@@ -1115,24 +1114,22 @@ export default function CCADesk() {
                 gridTemplateColumns:"90px 90px 3px 130px 70px 3px 90px 90px",
                 padding:"7px 12px",
               }}>
-                <span style={{fontSize:9,color:"#34d399",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",paddingRight:8,fontWeight:700}}>CALL</span>
-                <span style={{fontSize:9,color:"#34d39988",letterSpacing:"0.08em",textTransform:"uppercase",textAlign:"right",paddingRight:4}}>Delta</span>
+                <span style={{fontSize:9,color:"#93c5fd",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",paddingRight:8,fontWeight:700}}>CALL</span>
+                <span style={{fontSize:9,color:"#93c5fd66",letterSpacing:"0.08em",textTransform:"uppercase",textAlign:"right",paddingRight:4}}>Delta</span>
                 <span/>
                 <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:10}}>
-                  <span style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
-                  <span style={{fontSize:8,color:"#a78bfa55",letterSpacing:"0.08em",textTransform:"uppercase"}}>Vol%</span>
+                  <span style={{fontSize:9,color:"#ffffff99",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
+                  <span style={{fontSize:8,color:"#c4b5fd44",letterSpacing:"0.08em",textTransform:"uppercase"}}>Vol%</span>
                 </div>
                 <span/>
                 <span/>
-                <span style={{fontSize:9,color:"#f87171",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"left",paddingLeft:8,fontWeight:700}}>PUT</span>
-                <span style={{fontSize:9,color:"#f8717188",letterSpacing:"0.08em",textTransform:"uppercase",textAlign:"left",paddingLeft:4}}>Delta</span>
+                <span style={{fontSize:9,color:"#fca5a5",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"left",paddingLeft:8,fontWeight:700}}>PUT</span>
+                <span style={{fontSize:9,color:"#fca5a566",letterSpacing:"0.08em",textTransform:"uppercase",textAlign:"left",paddingLeft:4}}>Delta</span>
               </div>
 
               {rows.map((row,idx)=>{
                 const isATM   = Math.abs(row.K-F)<0.5;
                 const isNear  = Math.abs(row.K-F)<2;
-                const callItm = row.K<F;
-                const putItm  = row.K>F;
                 return (
                   <div key={row.K} style={{
                     display:"grid",
@@ -1140,56 +1137,56 @@ export default function CCADesk() {
                     padding:isATM?"10px 12px":"5px 12px",
                     borderBottom:"1px solid",
                     borderBottomColor:isNear?"#141e2c":"#0b0d10",
-                    background:isATM?"rgba(56,189,248,0.08)":idx%2===0?"transparent":"rgba(255,255,255,0.007)",
+                    background:isATM?"rgba(56,189,248,0.06)":idx%2===0?"transparent":"rgba(255,255,255,0.007)",
                     borderLeft:isATM?"3px solid #38bdf8":"3px solid transparent",
                     alignItems:"center",
                     transition:"background 0.1s",
                   }}>
-                    {/* Call price */}
+                    {/* Call price — light blue */}
                     <div style={{textAlign:"right",paddingRight:8}}>
                       <span style={{
-                        fontSize:isATM?16:13,fontWeight:isATM?700:600,
-                        color:row.call<0.005?"#1a2535":callItm?"#34d399":isATM?"#7dd3fc":"#2d4a5e",
+                        fontSize:isATM?16:13,fontWeight:600,
+                        color:row.call<0.005?"#1a2535":"#93c5fd",
                         fontVariantNumeric:"tabular-nums"
                       }}>
                         {row.call<0.005?"—":row.call.toFixed(2)}
                       </span>
                     </div>
                     {/* Call delta */}
-                    <span style={{fontSize:isATM?11:10,color:callItm?"#34d39988":"#1e3045",textAlign:"right",paddingRight:8,fontVariantNumeric:"tabular-nums"}}>
+                    <span style={{fontSize:10,color:"#93c5fd66",textAlign:"right",paddingRight:8,fontVariantNumeric:"tabular-nums"}}>
                       {row.cDelta.toFixed(2)}
                     </span>
                     {/* Left divider */}
-                    <div style={{width:1,background:isATM?"#38bdf833":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
-                    {/* Strike + vol CENTRE */}
+                    <div style={{width:1,background:isATM?"#ffffff22":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                    {/* Strike CENTRE — bold white */}
                     <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:10}}>
                       <span style={{
-                        fontSize:isATM?17:14,fontWeight:isATM?800:500,
-                        color:isATM?"#38bdf8":"#4a5d70",
+                        fontSize:isATM?18:14,fontWeight:700,
+                        color:"#ffffff",
                         fontVariantNumeric:"tabular-nums",letterSpacing:"0.01em"
                       }}>
                         {row.K}
                       </span>
-                      <span style={{fontSize:9,color:"#a78bfa55",fontVariantNumeric:"tabular-nums"}}>
+                      <span style={{fontSize:9,color:"#c4b5fd55",fontVariantNumeric:"tabular-nums"}}>
                         {(row.s*100).toFixed(1)}
                       </span>
                     </div>
                     {/* spacer col */}
                     <span/>
                     {/* Right divider */}
-                    <div style={{width:1,background:isATM?"#38bdf833":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
-                    {/* Put price */}
+                    <div style={{width:1,background:isATM?"#ffffff22":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                    {/* Put price — light red */}
                     <div style={{textAlign:"left",paddingLeft:8}}>
                       <span style={{
-                        fontSize:isATM?16:13,fontWeight:isATM?700:600,
-                        color:row.put<0.005?"#1a2535":putItm?"#f87171":isATM?"#fca5a5":"#2d4a5e",
+                        fontSize:isATM?16:13,fontWeight:600,
+                        color:row.put<0.005?"#1a2535":"#fca5a5",
                         fontVariantNumeric:"tabular-nums"
                       }}>
                         {row.put<0.005?"—":row.put.toFixed(2)}
                       </span>
                     </div>
                     {/* Put delta */}
-                    <span style={{fontSize:isATM?11:10,color:putItm?"#f8717188":"#1e3045",textAlign:"left",paddingLeft:4,fontVariantNumeric:"tabular-nums"}}>
+                    <span style={{fontSize:10,color:"#fca5a566",textAlign:"left",paddingLeft:4,fontVariantNumeric:"tabular-nums"}}>
                       {row.pDelta.toFixed(2)}
                     </span>
                   </div>
@@ -1392,15 +1389,15 @@ export default function CCADesk() {
                 <span style={{color:"#38bdf844"}}>Strike</span>
                 <span style={{color:"#a78bfa88",textAlign:"center"}}>σ(K) / Adj</span>
                 {/* CALLS */}
-                <span style={{color:"#34d39988",textAlign:"right"}}>Call $</span>
-                <span style={{color:"#34d39966",textAlign:"right"}}>Δ</span>
+                <span style={{color:"#93c5fd",textAlign:"right",fontWeight:700}}>Call $</span>
+                <span style={{color:"#93c5fd66",textAlign:"right"}}>Δ</span>
                 {greeksMode&&<><span style={{color:"#34d39966",textAlign:"right"}}>Γ</span><span style={{color:"#34d39966",textAlign:"right"}}>Θ/d</span><span style={{color:"#34d39966",textAlign:"right"}}>Vega</span></>}
                 {!greeksMode&&<span style={{color:"#34d39966",textAlign:"right"}}>Vega</span>}
                 {/* divider */}
                 <span/>
                 {/* PUTS */}
-                <span style={{color:"#f8718488",textAlign:"right"}}>Put $</span>
-                <span style={{color:"#f8718466",textAlign:"right"}}>Δ</span>
+                <span style={{color:"#fca5a5",textAlign:"right",fontWeight:700}}>Put $</span>
+                <span style={{color:"#fca5a566",textAlign:"right"}}>Δ</span>
                 {greeksMode&&<><span style={{color:"#f8718466",textAlign:"right"}}>Γ</span><span style={{color:"#f8718466",textAlign:"right"}}>Θ/d</span><span style={{color:"#f8718466",textAlign:"right"}}>Vega</span></>}
                 {!greeksMode&&<span style={{color:"#f8718466",textAlign:"right"}}>Vega</span>}
               </div>
@@ -1425,7 +1422,7 @@ export default function CCADesk() {
                     background:isATM?"rgba(56,189,248,0.08)":isNear?"rgba(56,189,248,0.02)":"transparent",
                     borderLeft:isATM?"2px solid #38bdf8":"2px solid transparent",
                   }}>
-                    <span style={{fontSize:12,fontWeight:isATM?700:500,color:isATM?"#38bdf8":"#7a8fa6",fontVariantNumeric:"tabular-nums"}}>
+                    <span style={{fontSize:13,fontWeight:700,color:"#ffffff",fontVariantNumeric:"tabular-nums"}}>
                       {row.K}{isATM&&<span style={{fontSize:7,marginLeft:2,color:"#38bdf8"}}>●</span>}
                     </span>
 
@@ -1443,13 +1440,13 @@ export default function CCADesk() {
                     {/* Call price */}
                     <div style={{position:"relative",textAlign:"right"}}>
                       <div style={{position:"absolute",right:0,top:"50%",transform:"translateY(-50%)",height:3,width:`${cBar}%`,background:"#34d39918",borderRadius:1}}/>
-                      <span style={{fontSize:12,fontWeight:600,color:row.call<0.005?"#1e2d3d":cColor,position:"relative",fontVariantNumeric:"tabular-nums"}}>
+                      <span style={{fontSize:12,fontWeight:600,color:row.call<0.005?"#1e2d3d":"#93c5fd",position:"relative",fontVariantNumeric:"tabular-nums"}}>
                         {row.call<0.005?"<0.01":row.call.toFixed(3)}
                       </span>
                     </div>
-                    <span style={{fontSize:10,color:"#34d39988",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.cDelta.toFixed(3)}</span>
-                    {greeksMode&&<><span style={{fontSize:9,color:"#34d39966",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
-                      <span style={{fontSize:9,color:"#34d39966",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.cTheta.toFixed(3)}</span></>}
+                    <span style={{fontSize:10,color:"#93c5fd77",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.cDelta.toFixed(3)}</span>
+                    {greeksMode&&<><span style={{fontSize:9,color:"#93c5fd55",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
+                      <span style={{fontSize:9,color:"#93c5fd55",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.cTheta.toFixed(3)}</span></>}
                     <span style={{fontSize:9,color:"#a78bfa66",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
 
                     {/* Divider */}
@@ -1458,13 +1455,13 @@ export default function CCADesk() {
                     {/* Put price */}
                     <div style={{position:"relative",textAlign:"right"}}>
                       <div style={{position:"absolute",right:0,top:"50%",transform:"translateY(-50%)",height:3,width:`${pBar}%`,background:"#f8718418",borderRadius:1}}/>
-                      <span style={{fontSize:12,fontWeight:600,color:row.put<0.005?"#1e2d3d":pColor,position:"relative",fontVariantNumeric:"tabular-nums"}}>
+                      <span style={{fontSize:12,fontWeight:600,color:row.put<0.005?"#1e2d3d":"#fca5a5",position:"relative",fontVariantNumeric:"tabular-nums"}}>
                         {row.put<0.005?"<0.01":row.put.toFixed(3)}
                       </span>
                     </div>
-                    <span style={{fontSize:10,color:"#f8718488",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.pDelta.toFixed(3)}</span>
-                    {greeksMode&&<><span style={{fontSize:9,color:"#f8718466",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
-                      <span style={{fontSize:9,color:"#f8718466",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.pTheta.toFixed(3)}</span></>}
+                    <span style={{fontSize:10,color:"#fca5a577",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.pDelta.toFixed(3)}</span>
+                    {greeksMode&&<><span style={{fontSize:9,color:"#fca5a555",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
+                      <span style={{fontSize:9,color:"#fca5a555",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.pTheta.toFixed(3)}</span></>}
                     <span style={{fontSize:9,color:"#a78bfa66",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
                   </div>
                 );
