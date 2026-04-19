@@ -201,6 +201,347 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
       <div style={{display:"flex",justifyContent:"space-between",fontSize:7,color:"#1e2d3d",marginTop:2}}>
         <span>{format?format(min):min}</span><span>{format?format(max):max}</span>
       </div>
+
+      {/* ════════════ WEST POWER TAB ════════════ */}
+      {tab===5 && (
+        <div>
+          {/* Hub selector + type toggle */}
+          <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"stretch"}}>
+
+            {/* Hub tabs */}
+            <div className="panel" style={{display:"flex",flexDirection:"column",gap:8}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:4}}>Hub</div>
+              <div style={{display:"flex",gap:6}}>
+                {WP_HUBS.map((h,i)=>(
+                  <button key={h} onClick={()=>setWpActiveHub(h)} style={{
+                    padding:"6px 14px",fontFamily:"'IBM Plex Mono',monospace",fontSize:11,fontWeight:600,
+                    letterSpacing:"0.06em",borderRadius:2,cursor:"pointer",border:"1px solid",
+                    borderColor:wpActiveHub===h?WP_COLORS[i]:"#182030",
+                    background:wpActiveHub===h?`${WP_COLORS[i]}18`:"#0b0f18",
+                    color:wpActiveHub===h?WP_COLORS[i]:"#475569",transition:"all 0.12s",
+                  }}>{h}</button>
+                ))}
+              </div>
+              {/* Contract type toggle */}
+              <div style={{display:"flex",gap:4,marginTop:4}}>
+                {["monthly","quarterly","cal"].map(t=>(
+                  <button key={t} onClick={()=>setWpActiveType(t)} style={{
+                    padding:"3px 10px",fontFamily:"'IBM Plex Mono',monospace",fontSize:9,
+                    letterSpacing:"0.08em",borderRadius:2,cursor:"pointer",border:"1px solid",
+                    borderColor:wpActiveType===t?"#38bdf8":"#182030",
+                    background:wpActiveType===t?"rgba(56,189,248,0.08)":"transparent",
+                    color:wpActiveType===t?"#38bdf8":"#475569",textTransform:"uppercase",
+                  }}>{t==="cal"?"CAL Year":t}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Price summary strip */}
+            <div className="panel" style={{flex:1,minWidth:300}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                {wpActiveHub} — All Hubs Quick View
+              </div>
+              <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                {WP_HUBS.map((h,i)=>{
+                  const refKey = wpActiveType==="monthly"?"Jan":wpActiveType==="quarterly"?"Q1":String(WP_CAL_YEARS[0]);
+                  const p=getWpPrice(h,wpActiveType,refKey);
+                  return (
+                    <div key={h} style={{cursor:"pointer"}} onClick={()=>setWpActiveHub(h)}>
+                      <div style={{fontSize:8,color:WP_COLORS[i],letterSpacing:"0.1em",marginBottom:2}}>{h}</div>
+                      <div style={{fontSize:16,fontWeight:700,color:WP_COLORS[i],fontFamily:"'IBM Plex Mono',monospace"}}>
+                        ${p.toFixed(2)}
+                      </div>
+                      {h!=="SP15"&&(
+                        <div style={{fontSize:9,color:"#475569"}}>
+                          {(wpSpreads[h]?.[wpActiveType]?.["Q1"]??0)>=0?"+":""}{(wpSpreads[h]?.[wpActiveType]?.["Q1"]??0).toFixed(2)} vs SP15
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Price table */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+
+            {/* SP15 prices — always editable */}
+            <div className="panel">
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#38bdf8",textTransform:"uppercase",marginBottom:10}}>
+                SP15 — Anchor Prices ($/MWh)
+              </div>
+
+              {/* Monthly */}
+              {wpActiveType==="monthly"&&(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+                  {WP_MONTHS.map(mo=>(
+                    <div key={mo} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"6px 8px"}}>
+                      <div style={{fontSize:8,color:"#334155",marginBottom:3}}>{mo}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:2}}>
+                        <span style={{fontSize:10,color:"#38bdf8"}}>$</span>
+                        <input type="number" step="0.25" value={wpSP15.monthly[mo]??50}
+                          onChange={e=>setWpSP15Price("monthly",mo,parseFloat(e.target.value)||0)}
+                          style={{background:"transparent",border:"none",borderBottom:"1px solid #38bdf844",
+                            color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:600,
+                            width:"100%",outline:"none",padding:"1px 0"}}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Quarterly */}
+              {wpActiveType==="quarterly"&&(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
+                  {WP_QUARTERS.map(q=>(
+                    <div key={q} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"8px 10px"}}>
+                      <div style={{fontSize:8,color:"#334155",marginBottom:3}}>{q} {q==="Q1"?"Jan-Mar":q==="Q2"?"Apr-Jun":q==="Q3"?"Jul-Sep":"Oct-Dec"}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:2}}>
+                        <span style={{fontSize:10,color:"#38bdf8"}}>$</span>
+                        <input type="number" step="0.25" value={wpSP15.quarterly[q]??50}
+                          onChange={e=>setWpSP15Price("quarterly",q,parseFloat(e.target.value)||0)}
+                          style={{background:"transparent",border:"none",borderBottom:"1px solid #38bdf844",
+                            color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,fontWeight:700,
+                            width:"100%",outline:"none",padding:"1px 0"}}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Cal Year */}
+              {wpActiveType==="cal"&&(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
+                  {WP_CAL_YEARS.map(y=>(
+                    <div key={y} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"10px 12px"}}>
+                      <div style={{fontSize:9,color:"#334155",marginBottom:4}}>CAL {y}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:2}}>
+                        <span style={{fontSize:11,color:"#38bdf8"}}>$</span>
+                        <input type="number" step="0.25" value={wpSP15.cal[String(y)]??55}
+                          onChange={e=>setWpSP15Price("cal",String(y),parseFloat(e.target.value)||0)}
+                          style={{background:"transparent",border:"none",borderBottom:"1px solid #38bdf844",
+                            color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontSize:20,fontWeight:700,
+                            width:"100%",outline:"none",padding:"1px 0"}}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Other hubs — spread inputs + derived prices */}
+            <div className="panel">
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                NP15 / Mid-C / PV — Spread vs SP15 ($/MWh)
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {WP_HUBS.filter(h=>h!=="SP15").map((h,hi)=>{
+                  const hColor=WP_COLORS[hi+1];
+                  const keys=wpActiveType==="monthly"?WP_MONTHS:wpActiveType==="quarterly"?WP_QUARTERS:WP_CAL_YEARS.map(String);
+                  return (
+                    <div key={h} style={{background:"#070b10",border:`1px solid ${hColor}33`,borderRadius:2,padding:"8px 10px"}}>
+                      <div style={{fontSize:9,fontWeight:600,color:hColor,marginBottom:8,letterSpacing:"0.08em"}}>{h}</div>
+                      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(keys.length,6)},1fr)`,gap:4}}>
+                        {keys.map(k=>{
+                          const sp15=getWpPrice("SP15",wpActiveType,k);
+                          const sprd=wpSpreads[h]?.[wpActiveType]?.[k]??0;
+                          const derived=sp15+sprd;
+                          return (
+                            <div key={k} style={{textAlign:"center"}}>
+                              <div style={{fontSize:7,color:"#334155",marginBottom:2}}>{k}</div>
+                              <div style={{fontSize:11,color:hColor,fontWeight:600,marginBottom:2}}>${derived.toFixed(2)}</div>
+                              <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:1}}>
+                                <input type="number" step="0.25" value={sprd}
+                                  onChange={e=>setWpSpread(h,wpActiveType,k,parseFloat(e.target.value)||0)}
+                                  style={{background:"#0b0f18",border:`1px solid ${hColor}33`,
+                                    color:hColor,fontFamily:"'IBM Plex Mono',monospace",fontSize:10,
+                                    width:52,outline:"none",borderRadius:2,padding:"2px 4px",textAlign:"center"}}/>
+                              </div>
+                              <div style={{fontSize:7,color:sprd>=0?"#34d39966":"#f8717166",marginTop:1}}>
+                                {sprd>=0?"+":""}{sprd.toFixed(2)}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Full price matrix — all hubs side by side */}
+          <div className="panel" style={{marginBottom:16}}>
+            <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+              Full Price Matrix — All Hubs ($/MWh)
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <div style={{minWidth:600}}>
+                {/* Header */}
+                <div style={{display:"grid",gridTemplateColumns:`120px repeat(${WP_HUBS.length},1fr)`,
+                  gap:"0 8px",fontSize:8,color:"#334155",letterSpacing:"0.1em",textTransform:"uppercase",
+                  padding:"4px 8px",borderBottom:"1px solid #182030",marginBottom:2}}>
+                  <span>Contract</span>
+                  {WP_HUBS.map((h,i)=><span key={h} style={{textAlign:"right",color:WP_COLORS[i]}}>{h}</span>)}
+                </div>
+
+                {/* Monthly rows */}
+                {wpActiveType==="monthly"&&WP_MONTHS.map((mo,idx)=>(
+                  <div key={mo} style={{display:"grid",gridTemplateColumns:`120px repeat(${WP_HUBS.length},1fr)`,
+                    gap:"0 8px",padding:"5px 8px",borderBottom:"1px solid #0a0e14",
+                    background:idx%2===0?"transparent":"rgba(255,255,255,0.007)",alignItems:"center"}}>
+                    <span style={{fontSize:11,fontWeight:600,color:"#ffffff"}}>{mo} {new Date().getFullYear()}</span>
+                    {WP_HUBS.map((h,i)=>{
+                      const p=getWpPrice(h,"monthly",mo);
+                      return <span key={h} style={{fontSize:12,fontWeight:600,color:WP_COLORS[i],textAlign:"right",fontVariantNumeric:"tabular-nums"}}>${p.toFixed(2)}</span>;
+                    })}
+                  </div>
+                ))}
+
+                {/* Quarterly rows */}
+                {wpActiveType==="quarterly"&&WP_QUARTERS.map((q,idx)=>(
+                  <div key={q} style={{display:"grid",gridTemplateColumns:`120px repeat(${WP_HUBS.length},1fr)`,
+                    gap:"0 8px",padding:"7px 8px",borderBottom:"1px solid #0a0e14",
+                    background:idx%2===0?"transparent":"rgba(255,255,255,0.007)",alignItems:"center"}}>
+                    <span style={{fontSize:11,fontWeight:600,color:"#ffffff"}}>{q} {q==="Q1"?"Jan-Mar":q==="Q2"?"Apr-Jun":q==="Q3"?"Jul-Sep":"Oct-Dec"}</span>
+                    {WP_HUBS.map((h,i)=>{
+                      const p=getWpPrice(h,"quarterly",q);
+                      return <span key={h} style={{fontSize:13,fontWeight:700,color:WP_COLORS[i],textAlign:"right",fontVariantNumeric:"tabular-nums"}}>${p.toFixed(2)}</span>;
+                    })}
+                  </div>
+                ))}
+
+                {/* Cal Year rows */}
+                {wpActiveType==="cal"&&WP_CAL_YEARS.map((y,idx)=>(
+                  <div key={y} style={{display:"grid",gridTemplateColumns:`120px repeat(${WP_HUBS.length},1fr)`,
+                    gap:"0 8px",padding:"9px 8px",borderBottom:"1px solid #0a0e14",
+                    background:idx%2===0?"transparent":"rgba(255,255,255,0.007)",alignItems:"center"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"#ffffff",letterSpacing:"0.05em"}}>CAL {y}</span>
+                    {WP_HUBS.map((h,i)=>{
+                      const p=getWpPrice(h,"cal",String(y));
+                      return <span key={h} style={{fontSize:15,fontWeight:700,color:WP_COLORS[i],textAlign:"right",fontVariantNumeric:"tabular-nums"}}>${p.toFixed(2)}</span>;
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Inter-hub spread calculator */}
+          <div className="panel">
+            <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:12}}>
+              Inter-Hub Spread Calculator
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
+              <div>
+                <div style={{fontSize:8,color:"#334155",marginBottom:4}}>Hub</div>
+                <select value={wpSpreadHub} onChange={e=>setWpSpreadHub(e.target.value)}
+                  style={{background:"#070b10",border:"1px solid #182030",color:"#38bdf8",
+                    fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,
+                    padding:"5px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}>
+                  {WP_HUBS.map(h=><option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{fontSize:8,color:"#334155",marginBottom:4}}>Near Contract</div>
+                <select value={wpSpreadNear} onChange={e=>setWpSpreadNear(e.target.value)}
+                  style={{background:"#070b10",border:"1px solid #34d399",color:"#34d399",
+                    fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,
+                    padding:"5px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}>
+                  <optgroup label="Monthly">{WP_MONTHS.map(m=><option key={m} value={"m_"+m}>{m}</option>)}</optgroup>
+                  <optgroup label="Quarterly">{WP_QUARTERS.map(q=><option key={q} value={"q_"+q}>{q}</option>)}</optgroup>
+                  <optgroup label="Cal Year">{WP_CAL_YEARS.map(y=><option key={y} value={"c_"+y}>CAL {y}</option>)}</optgroup>
+                </select>
+              </div>
+              <div style={{fontSize:16,color:"#334155",fontWeight:600,paddingBottom:4}}>/</div>
+              <div>
+                <div style={{fontSize:8,color:"#334155",marginBottom:4}}>Far Contract</div>
+                <select value={wpSpreadFar} onChange={e=>setWpSpreadFar(e.target.value)}
+                  style={{background:"#070b10",border:"1px solid #f87171",color:"#f87171",
+                    fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,
+                    padding:"5px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}>
+                  <optgroup label="Monthly">{WP_MONTHS.map(m=><option key={m} value={"m_"+m}>{m}</option>)}</optgroup>
+                  <optgroup label="Quarterly">{WP_QUARTERS.map(q=><option key={q} value={"q_"+q}>{q}</option>)}</optgroup>
+                  <optgroup label="Cal Year">{WP_CAL_YEARS.map(y=><option key={y} value={"c_"+y}>CAL {y}</option>)}</optgroup>
+                </select>
+              </div>
+              <button onClick={()=>{
+                const parse=v=>{
+                  const [type,key]=v.split("_",2);
+                  const ctype=type==="m"?"monthly":type==="q"?"quarterly":"cal";
+                  const p=getWpPrice(wpSpreadHub,ctype,key);
+                  return {type:ctype,key,price:p};
+                };
+                const near=parse(wpSpreadNear), far=parse(wpSpreadFar);
+                const spread=far.price-near.price;
+                const time=new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+                setWpFutBlotter(b=>[...b,{
+                  id:Date.now(),time,hub:wpSpreadHub,
+                  near:near.key,nearType:near.type,nearPrice:near.price,
+                  far:far.key,farType:far.type,farPrice:far.price,
+                  spread,
+                }]);
+              }} style={{
+                background:"#34d399",border:"none",borderRadius:2,color:"#070b10",
+                fontFamily:"'IBM Plex Mono',monospace",fontSize:9,fontWeight:700,
+                letterSpacing:"0.1em",padding:"8px 14px",cursor:"pointer",textTransform:"uppercase",
+              }}>+ Log Spread</button>
+            </div>
+
+            {/* Blotter */}
+            {wpFutBlotter.length===0?(
+              <div style={{padding:"16px 0",textAlign:"center",fontSize:9,color:"#1a2840"}}>No spreads logged yet</div>
+            ):(
+              <div style={{overflowX:"auto"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{fontSize:8,color:"#334155"}}>{wpFutBlotter.length} spread{wpFutBlotter.length!==1?"s":""} logged</span>
+                  <button onClick={()=>setWpFutBlotter([])}
+                    style={{fontSize:8,color:"#f87171",background:"transparent",border:"1px solid #f8717133",
+                      borderRadius:2,padding:"2px 8px",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace"}}>
+                    CLEAR
+                  </button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"52px 70px 80px 80px 90px 90px 90px 28px",
+                  gap:"0 8px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",
+                  padding:"3px 6px",borderBottom:"1px solid #182030",marginBottom:2,minWidth:560}}>
+                  <span>Time</span><span>Hub</span><span>Near</span><span>Far</span>
+                  <span style={{textAlign:"right"}}>Near $</span><span style={{textAlign:"right"}}>Far $</span>
+                  <span style={{textAlign:"right"}}>Spread</span><span/>
+                </div>
+                {wpFutBlotter.map((b,i)=>(
+                  <div key={b.id} className="rh" style={{display:"grid",
+                    gridTemplateColumns:"52px 70px 80px 80px 90px 90px 90px 28px",
+                    gap:"0 8px",alignItems:"center",padding:"6px 6px",
+                    borderBottom:"1px solid #0a0e14",minWidth:560,
+                    background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                    <span style={{fontSize:9,color:"#334155"}}>{b.time}</span>
+                    <span style={{fontSize:10,fontWeight:600,color:WP_COLORS[WP_HUBS.indexOf(b.hub)]||"#38bdf8"}}>{b.hub}</span>
+                    <span style={{fontSize:10,color:"#34d399"}}>{b.near}</span>
+                    <span style={{fontSize:10,color:"#f87171"}}>{b.far}</span>
+                    <span style={{fontSize:11,fontWeight:600,textAlign:"right",fontVariantNumeric:"tabular-nums",color:"#94a3b8"}}>${b.nearPrice.toFixed(2)}</span>
+                    <span style={{fontSize:11,fontWeight:600,textAlign:"right",fontVariantNumeric:"tabular-nums",color:"#94a3b8"}}>${b.farPrice.toFixed(2)}</span>
+                    <span style={{fontSize:12,fontWeight:700,textAlign:"right",fontVariantNumeric:"tabular-nums",
+                      color:b.spread>=0?"#34d399":"#f87171"}}>
+                      {b.spread>=0?"+":""}{b.spread.toFixed(2)}
+                    </span>
+                    <button onClick={()=>setWpFutBlotter(bl=>bl.filter(x=>x.id!==b.id))}
+                      style={{fontSize:9,color:"#334155",background:"transparent",border:"none",cursor:"pointer",
+                        fontFamily:"'IBM Plex Mono',monospace"}}
+                      onMouseEnter={e=>{e.target.style.color="#f87171";}}
+                      onMouseLeave={e=>{e.target.style.color="#334155";}}>x</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{marginTop:12,fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
+            West Power — SP15 anchor $/MWh · NP15, Mid-C, PV priced as SP15 + spread · Monthly, Quarterly, Cal Year contracts
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -853,6 +1194,67 @@ export default function CCADesk() {
   const [spreadFar,setSpreadFar]   = useState("Dec-26");
   const [futuresBlotter,setFuturesBlotter] = useState([]);
 
+  // ── West Power state ──────────────────────────────────────────────────────────
+  const WP_HUBS    = ["SP15","NP15","Mid-C","PV"];
+  const WP_COLORS  = ["#38bdf8","#34d399","#fb923c","#a78bfa"];
+  const WP_MONTHS  = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const WP_QUARTERS= ["Q1","Q2","Q3","Q4"]; // Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
+  const currentYear = new Date().getFullYear();
+  const WP_CAL_YEARS= [currentYear, currentYear+1];
+
+  // SP15 anchor prices: 12 monthly + 4 quarterly + 2 cal year
+  const initSP15 = () => {
+    const m={}; WP_MONTHS.forEach((mo,i)=>{ m[mo]=50+Math.round(Math.random()*10-5); });
+    const q={"Q1":52,"Q2":55,"Q3":60,"Q4":53};
+    const c={}; WP_CAL_YEARS.forEach(y=>{ c[String(y)]=56; });
+    return {monthly:m, quarterly:q, cal:c};
+  };
+  const [wpSP15,setWpSP15]       = useState(initSP15);
+  // Spreads: NP15-SP15, MidC-SP15, PV-SP15 for each contract type
+  const [wpSpreads,setWpSpreads] = useState({
+    NP15: { monthly:{}, quarterly:{"Q1":-1,"Q2":-1.5,"Q3":-2,"Q4":-1}, cal:{} },
+    "Mid-C": { monthly:{}, quarterly:{"Q1":-3,"Q2":-4,"Q3":-5,"Q4":-3}, cal:{} },
+    PV:   { monthly:{}, quarterly:{"Q1":0.5,"Q2":1,"Q3":2,"Q4":0.5}, cal:{} },
+  });
+  const [wpActiveHub,setWpActiveHub]     = useState("SP15");
+  const [wpActiveType,setWpActiveType]   = useState("monthly"); // monthly|quarterly|cal
+  const [wpFutBlotter,setWpFutBlotter]   = useState([]);
+  const [wpSpreadNear,setWpSpreadNear]   = useState("Jan");
+  const [wpSpreadFar,setWpSpreadFar]     = useState("Q1");
+  const [wpSpreadHub,setWpSpreadHub]     = useState("SP15");
+
+  function getWpPrice(hub, contractType, contractKey) {
+    if(hub==="SP15") {
+      if(contractType==="monthly") return wpSP15.monthly[contractKey]??50;
+      if(contractType==="quarterly") return wpSP15.quarterly[contractKey]??52;
+      if(contractType==="cal") return wpSP15.cal[contractKey]??55;
+    } else {
+      const sp15 = hub==="SP15"?0:0;
+      const base = contractType==="monthly"?wpSP15.monthly[contractKey]??50
+                 : contractType==="quarterly"?wpSP15.quarterly[contractKey]??52
+                 : wpSP15.cal[contractKey]??55;
+      const sprd = wpSpreads[hub]?.[contractType]?.[contractKey]??0;
+      return base + sprd;
+    }
+  }
+
+  function setWpSP15Price(contractType, key, val) {
+    setWpSP15(prev=>({
+      ...prev,
+      [contractType]: {...prev[contractType], [key]: val}
+    }));
+  }
+
+  function setWpSpread(hub, contractType, key, val) {
+    setWpSpreads(prev=>({
+      ...prev,
+      [hub]: {
+        ...prev[hub],
+        [contractType]: {...(prev[hub]?.[contractType]||{}), [key]: val}
+      }
+    }));
+  }
+
   function setQR(i,v){ setQuarterRates(p=>p.map((r,j)=>j===i?v:r)); }
   function commitPrice(v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) setAnchorPrice(n); }
 
@@ -1269,6 +1671,7 @@ export default function CCADesk() {
           {label:"Options Chain",badge:null},
           {label:"Vol Surface",badge:null},
           {label:"Futures Curve",badge:null},
+          {label:"West Power",badge:null},
         ].map(({label,badge},i)=>(
           <button key={label} className={`tab-btn${tab===i?" on":""}`} onClick={()=>setTab(i)}
             style={{position:"relative"}}>
