@@ -230,6 +230,381 @@ function RateInput({value,onChange,color,label}){
   );
 }
 
+
+// ─── Spread Builder + Blotter ─────────────────────────────────────────────────
+const STRATEGIES = [
+  { id:"Call Spread",    legs:(k1,k2,k3,qty,rows,F,T,r,vf)=>{
+      const l1=rows.find(r=>r.K===k1), l2=rows.find(r=>r.K===k2);
+      if(!l1||!l2) return null;
+      const prem = l1.call - l2.call;
+      const delta = l1.cDelta - l2.cDelta;
+      const vega  = l1.vega  - l2.vega;
+      const gamma = l1.gamma - l2.gamma;
+      const maxProfit = (k2-k1) - prem;
+      const maxLoss   = prem;
+      return { legs:[
+        {type:"Call",K:k1,pos:"+"+qty,price:l1.call,delta:l1.cDelta,vega:l1.vega},
+        {type:"Call",K:k2,pos:"-"+qty,price:l2.call,delta:-l2.cDelta,vega:-l2.vega},
+      ], netPrem:prem, delta, vega, gamma, maxProfit, maxLoss, breakeven:(k1+prem).toFixed(2) };
+  }},
+  { id:"Put Spread",     legs:(k1,k2,k3,qty,rows,F,T,r,vf)=>{
+      const l1=rows.find(r=>r.K===k2), l2=rows.find(r=>r.K===k1);
+      if(!l1||!l2) return null;
+      const prem = l1.put - l2.put;
+      const delta = l1.pDelta - l2.pDelta;
+      const vega  = l1.vega  - l2.vega;
+      const gamma = l1.gamma - l2.gamma;
+      const maxProfit = (k2-k1) - prem;
+      const maxLoss   = prem;
+      return { legs:[
+        {type:"Put",K:k2,pos:"+"+qty,price:l1.put,delta:l1.pDelta,vega:l1.vega},
+        {type:"Put",K:k1,pos:"-"+qty,price:l2.put,delta:-l2.pDelta,vega:-l2.vega},
+      ], netPrem:prem, delta, vega, gamma, maxProfit, maxLoss, breakeven:(k2-prem).toFixed(2) };
+  }},
+  { id:"Risk Reversal",  legs:(k1,k2,k3,qty,rows,F,T,r,vf)=>{
+      const lp=rows.find(r=>r.K===k1), lc=rows.find(r=>r.K===k2);
+      if(!lp||!lc) return null;
+      const prem  = lc.call - lp.put;
+      const delta = lc.cDelta - lp.pDelta;
+      const vega  = lc.vega  - lp.vega;
+      const gamma = lc.gamma - lp.gamma;
+      return { legs:[
+        {type:"Call",K:k2,pos:"+"+qty,price:lc.call,delta:lc.cDelta,vega:lc.vega},
+        {type:"Put", K:k1,pos:"-"+qty,price:lp.put, delta:lp.pDelta,vega:lp.vega},
+      ], netPrem:prem, delta, vega, gamma, maxProfit:"Unlimited", maxLoss:"Unlimited",
+         breakeven:`${(k1-lp.put).toFixed(2)} / ${(k2+lc.call).toFixed(2)}` };
+  }},
+  { id:"Call Ratio",     legs:(k1,k2,k3,qty,rows,F,T,r,vf)=>{
+      const l1=rows.find(r=>r.K===k1), l2=rows.find(r=>r.K===k2);
+      if(!l1||!l2) return null;
+      const prem  = l1.call - 2*l2.call;
+      const delta = l1.cDelta - 2*l2.cDelta;
+      const vega  = l1.vega  - 2*l2.vega;
+      const gamma = l1.gamma - 2*l2.gamma;
+      return { legs:[
+        {type:"Call",K:k1,pos:"+"+qty,     price:l1.call,delta:l1.cDelta,vega:l1.vega},
+        {type:"Call",K:k2,pos:"-"+(qty*2),price:l2.call,delta:-l2.cDelta*2,vega:-l2.vega*2},
+      ], netPrem:prem, delta, vega, gamma, maxProfit:(k2-k1+prem).toFixed(2)+" at K"+k2, maxLoss:"Unlimited above",
+         breakeven:(k1+prem>0?k1+prem:k1).toFixed(2) };
+  }},
+  { id:"Put Ratio",      legs:(k1,k2,k3,qty,rows,F,T,r,vf)=>{
+      const l1=rows.find(r=>r.K===k2), l2=rows.find(r=>r.K===k1);
+      if(!l1||!l2) return null;
+      const prem  = l1.put - 2*l2.put;
+      const delta = l1.pDelta - 2*l2.pDelta;
+      const vega  = l1.vega  - 2*l2.vega;
+      const gamma = l1.gamma - 2*l2.gamma;
+      return { legs:[
+        {type:"Put",K:k2,pos:"+"+qty,     price:l1.put,delta:l1.pDelta,vega:l1.vega},
+        {type:"Put",K:k1,pos:"-"+(qty*2),price:l2.put,delta:-l2.pDelta*2,vega:-l2.vega*2},
+      ], netPrem:prem, delta, vega, gamma, maxProfit:(k2-k1+prem).toFixed(2)+" at K"+k1, maxLoss:"Unlimited below",
+         breakeven:(k2-prem>0?k2-prem:k2).toFixed(2) };
+  }},
+  { id:"Straddle",       legs:(k1,k2,k3,qty,rows,F,T,r,vf)=>{
+      const l=rows.find(r=>r.K===k1);
+      if(!l) return null;
+      const prem  = l.call + l.put;
+      const delta = l.cDelta + l.pDelta;
+      const vega  = l.vega*2;
+      const gamma = l.gamma*2;
+      return { legs:[
+        {type:"Call",K:k1,pos:"+"+qty,price:l.call,delta:l.cDelta,vega:l.vega},
+        {type:"Put", K:k1,pos:"+"+qty,price:l.put, delta:l.pDelta,vega:l.vega},
+      ], netPrem:prem, delta, vega, gamma, maxProfit:"Unlimited", maxLoss:prem,
+         breakeven:`${(k1-prem).toFixed(2)} / ${(k1+prem).toFixed(2)}` };
+  }},
+  { id:"Strangle",       legs:(k1,k2,k3,qty,rows,F,T,r,vf)=>{
+      const lp=rows.find(r=>r.K===k1), lc=rows.find(r=>r.K===k2);
+      if(!lp||!lc) return null;
+      const prem  = lc.call + lp.put;
+      const delta = lc.cDelta + lp.pDelta;
+      const vega  = lc.vega+lp.vega;
+      const gamma = lc.gamma+lp.gamma;
+      return { legs:[
+        {type:"Put", K:k1,pos:"+"+qty,price:lp.put, delta:lp.pDelta,vega:lp.vega},
+        {type:"Call",K:k2,pos:"+"+qty,price:lc.call,delta:lc.cDelta,vega:lc.vega},
+      ], netPrem:prem, delta, vega, gamma, maxProfit:"Unlimited", maxLoss:prem,
+         breakeven:`${(k1-prem).toFixed(2)} / ${(k2+prem).toFixed(2)}` };
+  }},
+  { id:"Butterfly",      legs:(k1,k2,k3,qty,rows,F,T,r,vf)=>{
+      const l1=rows.find(r=>r.K===k1), l2=rows.find(r=>r.K===k2), l3=rows.find(r=>r.K===k3);
+      if(!l1||!l2||!l3) return null;
+      const prem  = l1.call - 2*l2.call + l3.call;
+      const delta = l1.cDelta - 2*l2.cDelta + l3.cDelta;
+      const vega  = l1.vega  - 2*l2.vega  + l3.vega;
+      const gamma = l1.gamma - 2*l2.gamma + l3.gamma;
+      return { legs:[
+        {type:"Call",K:k1,pos:"+"+qty,     price:l1.call,delta:l1.cDelta,vega:l1.vega},
+        {type:"Call",K:k2,pos:"-"+(qty*2),price:l2.call,delta:-l2.cDelta*2,vega:-l2.vega*2},
+        {type:"Call",K:k3,pos:"+"+qty,     price:l3.call,delta:l3.cDelta,vega:l3.vega},
+      ], netPrem:prem, delta, vega, gamma,
+         maxProfit:(k2-k1-prem).toFixed(2)+" at K"+k2, maxLoss:prem,
+         breakeven:`${(k1+prem).toFixed(2)} / ${(k3-prem).toFixed(2)}` };
+  }},
+];
+
+const STRAT_NEEDS_K3 = ["Butterfly"];
+const STRAT_COLORS = {
+  "Call Spread":"#34d399","Put Spread":"#f87171","Risk Reversal":"#a78bfa",
+  "Call Ratio":"#38bdf8","Put Ratio":"#fb923c","Straddle":"#fbbf24",
+  "Strangle":"#e879f9","Butterfly":"#67e8f9"
+};
+
+function SpreadBuilder({rows,F,T,r,volFn,sStrat,setSStrat,sExpiry,setSExpiry,
+  sK1,setSK1,sK2,setSK2,sK3,setSK3,sQty,setSQty,blotter,setBlotter,
+  selectedExpiry,OPTIONS_EXPIRIES,MONTHS}) {
+
+  const needsK3 = STRAT_NEEDS_K3.includes(sStrat);
+  const stratDef = STRATEGIES.find(s=>s.id===sStrat);
+  const preview  = useMemo(()=>{
+    if(!stratDef) return null;
+    return stratDef.legs(sK1,sK2,sK3,sQty,rows,F,T,r,volFn);
+  },[sStrat,sK1,sK2,sK3,sQty,rows,F,T,r,volFn,stratDef]);
+
+  function addToBlotter() {
+    if(!preview) return;
+    const id = Date.now();
+    const time = new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+    setBlotter(b=>[...b,{
+      id, time, strat:sStrat, expiry:sExpiry,
+      k1:sK1, k2:sK2, k3:needsK3?sK3:null,
+      qty:sQty, ...preview
+    }]);
+  }
+
+  const totalNetPrem  = blotter.reduce((s,b)=>s+(typeof b.netPrem==="number"?b.netPrem:0),0);
+  const totalDelta    = blotter.reduce((s,b)=>s+(typeof b.delta==="number"?b.delta:0),0);
+  const totalVega     = blotter.reduce((s,b)=>s+(typeof b.vega==="number"?b.vega:0),0);
+
+  const selColor = STRAT_COLORS[sStrat]||"#38bdf8";
+
+  return (
+    <div style={{marginTop:22}}>
+      {/* ── Builder panel */}
+      <div style={{background:"#0b0f18",border:"1px solid #182030",borderRadius:3,padding:"14px 16px",marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase"}}>
+            Options Spread Builder
+          </div>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <span style={{fontSize:8,color:"#334155"}}>EXPIRY</span>
+            <select value={sExpiry} onChange={e=>setSExpiry(e.target.value)}
+              style={{background:"#070b10",border:"1px solid #182030",color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,padding:"3px 6px",borderRadius:2,outline:"none",cursor:"pointer"}}>
+              {OPTIONS_EXPIRIES.map(e=>{
+                const key=MONTHS[e.month].slice(0,3)+"-"+String(e.year).slice(2);
+                return <option key={key} value={key}>{key}</option>;
+              })}
+            </select>
+          </div>
+        </div>
+
+        {/* Strategy selector */}
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:14}}>
+          {STRATEGIES.map(s=>(
+            <button key={s.id} onClick={()=>setSStrat(s.id)}
+              style={{padding:"4px 10px",fontSize:9,fontFamily:"'IBM Plex Mono',monospace",
+                letterSpacing:"0.06em",borderRadius:2,cursor:"pointer",border:"1px solid",
+                borderColor:sStrat===s.id?STRAT_COLORS[s.id]:"#182030",
+                background:sStrat===s.id?"rgba(56,189,248,0.06)":"#070b10",
+                color:sStrat===s.id?STRAT_COLORS[s.id]:"#475569",
+                transition:"all 0.12s"}}>
+              {s.id}
+            </button>
+          ))}
+        </div>
+
+        {/* Strike + qty selectors */}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end",marginBottom:14}}>
+          {[
+            {label:sStrat==="Straddle"?"ATM Strike":sStrat==="Strangle"||sStrat==="Risk Reversal"?"Put Strike":"Lower Strike",
+             val:sK1,set:setSK1},
+            ...( sStrat!=="Straddle" ? [{
+              label:sStrat==="Strangle"||sStrat==="Risk Reversal"?"Call Strike":"Upper Strike",
+              val:sK2,set:setSK2}] : [] ),
+            ...( needsK3 ? [{label:"Body Strike",val:sK3,set:setSK3}] : [] ),
+          ].map(({label,val,set})=>(
+            <div key={label}>
+              <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:4}}>{label}</div>
+              <select value={val} onChange={e=>set(parseInt(e.target.value))}
+                style={{background:"#070b10",border:`1px solid ${selColor}44`,color:selColor,
+                  fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:600,
+                  padding:"5px 8px",borderRadius:2,outline:"none",cursor:"pointer",width:72}}>
+                {STRIKES.map(k=><option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+          ))}
+          <div>
+            <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:4}}>QTY (lots)</div>
+            <input type="number" min={1} step={1} value={sQty}
+              onChange={e=>setSQty(Math.max(1,parseInt(e.target.value)||1))}
+              style={{background:"#070b10",border:"1px solid #182030",color:"#d8e2ef",
+                fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:600,
+                padding:"5px 8px",borderRadius:2,outline:"none",width:72,textAlign:"right"}}/>
+          </div>
+        </div>
+
+        {/* Preview */}
+        {preview && (
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"stretch"}}>
+            {/* Legs */}
+            <div style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"8px 12px",flex:1,minWidth:200}}>
+              <div style={{fontSize:7,color:"#334155",letterSpacing:"0.1em",marginBottom:6}}>LEGS</div>
+              {preview.legs.map((lg,i)=>(
+                <div key={i} style={{display:"flex",gap:10,alignItems:"baseline",marginBottom:3}}>
+                  <span style={{fontSize:9,fontWeight:600,color:selColor,minWidth:14}}>{lg.pos}</span>
+                  <span style={{fontSize:10,color:"#94a3b8"}}>{lg.type} K={lg.K}</span>
+                  <span style={{fontSize:10,color:"#d8e2ef",fontWeight:600}}>${lg.price.toFixed(3)}</span>
+                  <span style={{fontSize:9,color:"#475569"}}>d={lg.delta.toFixed(3)}</span>
+                </div>
+              ))}
+            </div>
+            {/* Net premium */}
+            <div style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"8px 12px",minWidth:110}}>
+              <div style={{fontSize:7,color:"#334155",letterSpacing:"0.1em",marginBottom:4}}>NET PREMIUM</div>
+              <div style={{fontSize:20,fontWeight:600,color:preview.netPrem>=0?"#34d399":"#f87171",fontFamily:"'IBM Plex Mono',monospace"}}>
+                {preview.netPrem>=0?"+":""}{typeof preview.netPrem==="number"?preview.netPrem.toFixed(3):preview.netPrem}
+              </div>
+              <div style={{fontSize:8,color:"#334155",marginTop:2}}>per lot</div>
+            </div>
+            {/* Greeks */}
+            <div style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"8px 12px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px 14px",minWidth:160}}>
+              {[
+                ["Net Delta", typeof preview.delta==="number"?preview.delta.toFixed(3):preview.delta],
+                ["Net Vega",  typeof preview.vega==="number"?preview.vega.toFixed(3):preview.vega],
+                ["Net Gamma", typeof preview.gamma==="number"?preview.gamma.toFixed(4):preview.gamma],
+                ["Breakeven", preview.breakeven],
+              ].map(([k,v])=>(
+                <div key={k}>
+                  <div style={{fontSize:7,color:"#334155",letterSpacing:"0.08em"}}>{k}</div>
+                  <div style={{fontSize:10,color:"#94a3b8",fontWeight:600}}>{v}</div>
+                </div>
+              ))}
+            </div>
+            {/* Max P&L */}
+            <div style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"8px 12px",minWidth:130}}>
+              <div style={{fontSize:7,color:"#334155",letterSpacing:"0.1em",marginBottom:6}}>P&L PROFILE</div>
+              <div style={{marginBottom:4}}>
+                <div style={{fontSize:7,color:"#334155"}}>MAX PROFIT</div>
+                <div style={{fontSize:11,color:"#34d399",fontWeight:600}}>
+                  {typeof preview.maxProfit==="number"?`$${(preview.maxProfit*sQty).toFixed(2)}`:preview.maxProfit}
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:7,color:"#334155"}}>MAX LOSS</div>
+                <div style={{fontSize:11,color:"#f87171",fontWeight:600}}>
+                  {typeof preview.maxLoss==="number"?`$${(preview.maxLoss*sQty).toFixed(2)}`:preview.maxLoss}
+                </div>
+              </div>
+            </div>
+            {/* Add button */}
+            <div style={{display:"flex",alignItems:"center"}}>
+              <button onClick={addToBlotter}
+                style={{background:selColor,border:"none",borderRadius:2,
+                  color:"#070b10",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,
+                  fontWeight:700,letterSpacing:"0.1em",padding:"10px 16px",cursor:"pointer",
+                  textTransform:"uppercase",whiteSpace:"nowrap"}}>
+                + Add to Blotter
+              </button>
+            </div>
+          </div>
+        )}
+        {!preview && (
+          <div style={{padding:"12px 0",fontSize:9,color:"#1e2d3d",textAlign:"center"}}>
+            Configure strikes to preview spread
+          </div>
+        )}
+      </div>
+
+      {/* ── Blotter table */}
+      <div style={{background:"#0b0f18",border:"1px solid #182030",borderRadius:3,padding:"12px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{display:"flex",alignItems:"baseline",gap:12}}>
+            <span style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase"}}>Trade Blotter</span>
+            <span style={{fontSize:9,color:"#334155"}}>{blotter.length} entr{blotter.length===1?"y":"ies"}</span>
+            {blotter.length>0&&(
+              <span style={{fontSize:9,color:"#475569"}}>
+                Net Prem: <span style={{color:totalNetPrem>=0?"#34d399":"#f87171",fontWeight:600}}>{totalNetPrem>=0?"+":""}{totalNetPrem.toFixed(3)}</span>
+                &nbsp;|&nbsp;Net Delta: <span style={{color:"#38bdf8",fontWeight:600}}>{totalDelta.toFixed(3)}</span>
+                &nbsp;|&nbsp;Net Vega: <span style={{color:"#a78bfa",fontWeight:600}}>{totalVega.toFixed(3)}</span>
+              </span>
+            )}
+          </div>
+          {blotter.length>0&&(
+            <button onClick={()=>setBlotter([])}
+              style={{fontSize:8,color:"#f87171",background:"transparent",border:"1px solid #f8717133",
+                borderRadius:2,padding:"3px 10px",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace",
+                letterSpacing:"0.08em"}}>
+              CLEAR ALL
+            </button>
+          )}
+        </div>
+
+        {blotter.length===0 ? (
+          <div style={{padding:"24px 0",textAlign:"center",fontSize:9,color:"#1a2840",letterSpacing:"0.08em"}}>
+            No trades — add spreads above to build your blotter
+          </div>
+        ) : (
+          <div style={{overflowX:"auto"}}>
+            {/* Header */}
+            <div style={{display:"grid",gridTemplateColumns:"52px 70px 90px 130px 80px 80px 80px 80px 110px 32px",
+              gap:"0 6px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",
+              padding:"3px 6px",borderBottom:"1px solid #182030",marginBottom:2,minWidth:720}}>
+              <span>Time</span><span>Expiry</span><span>Strategy</span><span>Legs</span>
+              <span style={{textAlign:"right"}}>Net Prem</span>
+              <span style={{textAlign:"right"}}>Delta</span>
+              <span style={{textAlign:"right"}}>Vega</span>
+              <span style={{textAlign:"right"}}>Breakeven</span>
+              <span style={{textAlign:"right"}}>P&L Max</span>
+              <span/>
+            </div>
+            {blotter.map((b,i)=>{
+              const sc=STRAT_COLORS[b.strat]||"#38bdf8";
+              return (
+                <div key={b.id} className="rh" style={{display:"grid",
+                  gridTemplateColumns:"52px 70px 90px 130px 80px 80px 80px 80px 110px 32px",
+                  gap:"0 6px",alignItems:"center",padding:"6px 6px",
+                  borderBottom:"1px solid #0a0e14",minWidth:720,
+                  background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                  <span style={{fontSize:9,color:"#334155"}}>{b.time}</span>
+                  <span style={{fontSize:9,color:"#38bdf8"}}>{b.expiry}</span>
+                  <span style={{fontSize:9,fontWeight:600,color:sc}}>{b.strat}</span>
+                  <span style={{fontSize:9,color:"#94a3b8"}}>
+                    {b.legs.map(l=>`${l.pos} ${l.type} K${l.K}`).join(" / ")}
+                  </span>
+                  <span style={{fontSize:10,fontWeight:600,textAlign:"right",
+                    color:typeof b.netPrem==="number"&&b.netPrem>=0?"#34d399":"#f87171",
+                    fontVariantNumeric:"tabular-nums"}}>
+                    {typeof b.netPrem==="number"?(b.netPrem>=0?"+":"")+b.netPrem.toFixed(3):b.netPrem}
+                  </span>
+                  <span style={{fontSize:9,textAlign:"right",color:"#38bdf8",fontVariantNumeric:"tabular-nums"}}>
+                    {typeof b.delta==="number"?b.delta.toFixed(3):b.delta}
+                  </span>
+                  <span style={{fontSize:9,textAlign:"right",color:"#a78bfa",fontVariantNumeric:"tabular-nums"}}>
+                    {typeof b.vega==="number"?b.vega.toFixed(3):b.vega}
+                  </span>
+                  <span style={{fontSize:9,textAlign:"right",color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>
+                    {b.breakeven}
+                  </span>
+                  <span style={{fontSize:9,textAlign:"right",color:"#475569",fontVariantNumeric:"tabular-nums"}}>
+                    <span style={{color:"#34d399"}}>{typeof b.maxProfit==="number"?"+$"+(b.maxProfit*b.qty).toFixed(0):b.maxProfit}</span>
+                    {" / "}
+                    <span style={{color:"#f87171"}}>{typeof b.maxLoss==="number"?"-$"+(b.maxLoss*b.qty).toFixed(0):b.maxLoss}</span>
+                  </span>
+                  <button onClick={()=>setBlotter(bl=>bl.filter(x=>x.id!==b.id))}
+                    style={{fontSize:8,color:"#475569",background:"transparent",border:"none",
+                      cursor:"pointer",padding:"2px 4px",fontFamily:"'IBM Plex Mono',monospace"}}>
+                    x
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function CCADesk() {
   // ── Futures state
@@ -250,6 +625,15 @@ export default function CCADesk() {
   const [selectedExpiry,setSelectedExpiry] = useState("Dec-26");
   const [greeksMode,setGreeksMode]         = useState(false);
   const [tab,setTab]                       = useState(0);
+
+  // ── Options spread blotter
+  const [blotter,setBlotter]               = useState([]);
+  const [sStrat,setSStrat]                 = useState("Call Spread");
+  const [sExpiry,setSExpiry]               = useState("Dec-26");
+  const [sK1,setSK1]                       = useState(28);
+  const [sK2,setSK2]                       = useState(30);
+  const [sK3,setSK3]                       = useState(32);
+  const [sQty,setSQty]                     = useState(100);
 
   // ── Spread state
   const [spreadNear,setSpreadNear] = useState("Apr-26");
@@ -581,9 +965,24 @@ export default function CCADesk() {
             </div>
           </div>
           <div style={{marginTop:14,borderTop:"1px solid #182030",paddingTop:9,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,fontSize:8,color:"#1a2840",letterSpacing:"0.06em"}}>
-            <span>BS FUTURES OPTIONS · σ(K)=ATMvol + Skew·ln(K/F) + Convexity·ln(K/F)² + adj</span>
-            <span>● ATM · ITM=green · OTM=dim · adj=per-strike pp override</span>
+            <span>BS FUTURES OPTIONS - sigma(K)=ATMvol + Skew x ln(K/F) + Convexity x ln(K/F)^2 + adj</span>
+            <span>ATM highlighted - ITM=green - OTM=dim - adj=per-strike pp override</span>
           </div>
+
+          {/* ════ SPREAD BUILDER ════ */}
+          <SpreadBuilder
+            rows={rows} F={F} T={T} r={r} volFn={volFn}
+            sStrat={sStrat} setSStrat={setSStrat}
+            sExpiry={sExpiry} setSExpiry={setSExpiry}
+            sK1={sK1} setSK1={setSK1}
+            sK2={sK2} setSK2={setSK2}
+            sK3={sK3} setSK3={setSK3}
+            sQty={sQty} setSQty={setSQty}
+            blotter={blotter} setBlotter={setBlotter}
+            selectedExpiry={selectedExpiry}
+            OPTIONS_EXPIRIES={OPTIONS_EXPIRIES}
+            MONTHS={MONTHS}
+          />
         </div>
       )}
 
