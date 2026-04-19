@@ -24,6 +24,23 @@ const OPTIONS_EXPIRIES = [
   {label:"Dec-27", month:11, year:2027},
 ];
 
+
+// ─── West Power Constants ──────────────────────────────────────────────────────
+const WP_HUBS     = ["SP15","NP15","Mid-C","PV"];
+const WP_COLORS   = ["#38bdf8","#34d399","#fb923c","#a78bfa"];
+const WP_MONTHS_L = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const WP_QUARTERS_L = ["Q1","Q2","Q3","Q4"];
+const WP_INIT_SP15 = {
+  monthly:  {Jan:50,Feb:48,Mar:52,Apr:55,May:57,Jun:62,Jul:68,Aug:65,Sep:58,Oct:53,Nov:51,Dec:54},
+  quarterly:{Q1:50,Q2:58,Q3:65,Q4:53},
+  cal:      {[new Date().getFullYear()]:56,[new Date().getFullYear()+1]:58},
+};
+const WP_INIT_SPREADS = {
+  NP15:   { monthly:{Jan:-1,Feb:-1,Mar:-1,Apr:-1.5,May:-1.5,Jun:-1.5,Jul:-2,Aug:-2,Sep:-1.5,Oct:-1,Nov:-1,Dec:-1}, quarterly:{Q1:-1,Q2:-1.5,Q3:-2,Q4:-1},   cal:{} },
+  "Mid-C":{ monthly:{Jan:-3,Feb:-3,Mar:-3,Apr:-4,May:-4,Jun:-4,Jul:-5,Aug:-5,Sep:-4,Oct:-3,Nov:-3,Dec:-3},         quarterly:{Q1:-3,Q2:-4,Q3:-5,Q4:-3},   cal:{} },
+  PV:     { monthly:{Jan:0.5,Feb:0.5,Mar:0.5,Apr:1,May:1,Jun:1.5,Jul:2,Aug:2,Sep:1,Oct:0.5,Nov:0.5,Dec:0.5},     quarterly:{Q1:0.5,Q2:1,Q3:2,Q4:0.5}, cal:{} },
+};
+
 // ─── Math ─────────────────────────────────────────────────────────────────────
 function erf(x) {
   const a = Math.abs(x);
@@ -243,7 +260,7 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
               </div>
               <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
                 {WP_HUBS.map((h,i)=>{
-                  const refKey = wpActiveType==="monthly"?"Jan":wpActiveType==="quarterly"?"Q1":String(WP_CAL_YEARS[0]);
+                  const refKey = wpActiveType==="monthly"?"Jan":wpActiveType==="quarterly"?"Q1":String(wpCalYears[0]);
                   const p=getWpPrice(h,wpActiveType,refKey);
                   return (
                     <div key={h} style={{cursor:"pointer"}} onClick={()=>setWpActiveHub(h)}>
@@ -275,7 +292,7 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
               {/* Monthly */}
               {wpActiveType==="monthly"&&(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
-                  {WP_MONTHS.map(mo=>(
+                  {WP_MONTHS_L.map(mo=>(
                     <div key={mo} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"6px 8px"}}>
                       <div style={{fontSize:8,color:"#334155",marginBottom:3}}>{mo}</div>
                       <div style={{display:"flex",alignItems:"center",gap:2}}>
@@ -294,7 +311,7 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
               {/* Quarterly */}
               {wpActiveType==="quarterly"&&(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
-                  {WP_QUARTERS.map(q=>(
+                  {WP_QUARTERS_L.map(q=>(
                     <div key={q} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"8px 10px"}}>
                       <div style={{fontSize:8,color:"#334155",marginBottom:3}}>{q} {q==="Q1"?"Jan-Mar":q==="Q2"?"Apr-Jun":q==="Q3"?"Jul-Sep":"Oct-Dec"}</div>
                       <div style={{display:"flex",alignItems:"center",gap:2}}>
@@ -313,7 +330,7 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
               {/* Cal Year */}
               {wpActiveType==="cal"&&(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
-                  {WP_CAL_YEARS.map(y=>(
+                  {wpCalYears.map(y=>(
                     <div key={y} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"10px 12px"}}>
                       <div style={{fontSize:9,color:"#334155",marginBottom:4}}>CAL {y}</div>
                       <div style={{display:"flex",alignItems:"center",gap:2}}>
@@ -338,7 +355,7 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {WP_HUBS.filter(h=>h!=="SP15").map((h,hi)=>{
                   const hColor=WP_COLORS[hi+1];
-                  const keys=wpActiveType==="monthly"?WP_MONTHS:wpActiveType==="quarterly"?WP_QUARTERS:WP_CAL_YEARS.map(String);
+                  const keys=wpActiveType==="monthly"?WP_MONTHS_L:wpActiveType==="quarterly"?WP_QUARTERS_L:wpCalYears.map(String);
                   return (
                     <div key={h} style={{background:"#070b10",border:`1px solid ${hColor}33`,borderRadius:2,padding:"8px 10px"}}>
                       <div style={{fontSize:9,fontWeight:600,color:hColor,marginBottom:8,letterSpacing:"0.08em"}}>{h}</div>
@@ -388,7 +405,7 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
                 </div>
 
                 {/* Monthly rows */}
-                {wpActiveType==="monthly"&&WP_MONTHS.map((mo,idx)=>(
+                {wpActiveType==="monthly"&&WP_MONTHS_L.map((mo,idx)=>(
                   <div key={mo} style={{display:"grid",gridTemplateColumns:`120px repeat(${WP_HUBS.length},1fr)`,
                     gap:"0 8px",padding:"5px 8px",borderBottom:"1px solid #0a0e14",
                     background:idx%2===0?"transparent":"rgba(255,255,255,0.007)",alignItems:"center"}}>
@@ -401,7 +418,7 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
                 ))}
 
                 {/* Quarterly rows */}
-                {wpActiveType==="quarterly"&&WP_QUARTERS.map((q,idx)=>(
+                {wpActiveType==="quarterly"&&WP_QUARTERS_L.map((q,idx)=>(
                   <div key={q} style={{display:"grid",gridTemplateColumns:`120px repeat(${WP_HUBS.length},1fr)`,
                     gap:"0 8px",padding:"7px 8px",borderBottom:"1px solid #0a0e14",
                     background:idx%2===0?"transparent":"rgba(255,255,255,0.007)",alignItems:"center"}}>
@@ -450,9 +467,9 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
                   style={{background:"#070b10",border:"1px solid #34d399",color:"#34d399",
                     fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,
                     padding:"5px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}>
-                  <optgroup label="Monthly">{WP_MONTHS.map(m=><option key={m} value={"m_"+m}>{m}</option>)}</optgroup>
-                  <optgroup label="Quarterly">{WP_QUARTERS.map(q=><option key={q} value={"q_"+q}>{q}</option>)}</optgroup>
-                  <optgroup label="Cal Year">{WP_CAL_YEARS.map(y=><option key={y} value={"c_"+y}>CAL {y}</option>)}</optgroup>
+                  <optgroup label="Monthly">{WP_MONTHS_L.map(m=><option key={m} value={"m_"+m}>{m}</option>)}</optgroup>
+                  <optgroup label="Quarterly">{WP_QUARTERS_L.map(q=><option key={q} value={"q_"+q}>{q}</option>)}</optgroup>
+                  <optgroup label="Cal Year">{wpCalYears.map(y=><option key={y} value={"c_"+y}>CAL {y}</option>)}</optgroup>
                 </select>
               </div>
               <div style={{fontSize:16,color:"#334155",fontWeight:600,paddingBottom:4}}>/</div>
@@ -462,9 +479,9 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
                   style={{background:"#070b10",border:"1px solid #f87171",color:"#f87171",
                     fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,
                     padding:"5px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}>
-                  <optgroup label="Monthly">{WP_MONTHS.map(m=><option key={m} value={"m_"+m}>{m}</option>)}</optgroup>
-                  <optgroup label="Quarterly">{WP_QUARTERS.map(q=><option key={q} value={"q_"+q}>{q}</option>)}</optgroup>
-                  <optgroup label="Cal Year">{WP_CAL_YEARS.map(y=><option key={y} value={"c_"+y}>CAL {y}</option>)}</optgroup>
+                  <optgroup label="Monthly">{WP_MONTHS_L.map(m=><option key={m} value={"m_"+m}>{m}</option>)}</optgroup>
+                  <optgroup label="Quarterly">{WP_QUARTERS_L.map(q=><option key={q} value={"q_"+q}>{q}</option>)}</optgroup>
+                  <optgroup label="Cal Year">{wpCalYears.map(y=><option key={y} value={"c_"+y}>CAL {y}</option>)}</optgroup>
                 </select>
               </div>
               <button onClick={()=>{
@@ -1195,47 +1212,23 @@ export default function CCADesk() {
   const [futuresBlotter,setFuturesBlotter] = useState([]);
 
   // ── West Power state ──────────────────────────────────────────────────────────
-  const WP_HUBS    = ["SP15","NP15","Mid-C","PV"];
-  const WP_COLORS  = ["#38bdf8","#34d399","#fb923c","#a78bfa"];
-  const WP_MONTHS  = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const WP_QUARTERS= ["Q1","Q2","Q3","Q4"]; // Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
-  const currentYear = new Date().getFullYear();
-  const WP_CAL_YEARS= [currentYear, currentYear+1];
-
-  // SP15 anchor prices: 12 monthly + 4 quarterly + 2 cal year
-  const initSP15 = () => {
-    const m={}; WP_MONTHS.forEach((mo,i)=>{ m[mo]=50+Math.round(Math.random()*10-5); });
-    const q={"Q1":52,"Q2":55,"Q3":60,"Q4":53};
-    const c={}; WP_CAL_YEARS.forEach(y=>{ c[String(y)]=56; });
-    return {monthly:m, quarterly:q, cal:c};
-  };
-  const [wpSP15,setWpSP15]       = useState(initSP15);
-  // Spreads: NP15-SP15, MidC-SP15, PV-SP15 for each contract type
-  const [wpSpreads,setWpSpreads] = useState({
-    NP15: { monthly:{}, quarterly:{"Q1":-1,"Q2":-1.5,"Q3":-2,"Q4":-1}, cal:{} },
-    "Mid-C": { monthly:{}, quarterly:{"Q1":-3,"Q2":-4,"Q3":-5,"Q4":-3}, cal:{} },
-    PV:   { monthly:{}, quarterly:{"Q1":0.5,"Q2":1,"Q3":2,"Q4":0.5}, cal:{} },
-  });
-  const [wpActiveHub,setWpActiveHub]     = useState("SP15");
-  const [wpActiveType,setWpActiveType]   = useState("monthly"); // monthly|quarterly|cal
-  const [wpFutBlotter,setWpFutBlotter]   = useState([]);
-  const [wpSpreadNear,setWpSpreadNear]   = useState("Jan");
-  const [wpSpreadFar,setWpSpreadFar]     = useState("Q1");
-  const [wpSpreadHub,setWpSpreadHub]     = useState("SP15");
+  const wpCalYears = [new Date().getFullYear(), new Date().getFullYear()+1];
+  const [wpSP15,setWpSP15]           = useState(WP_INIT_SP15);
+  const [wpSpreads,setWpSpreads]     = useState(WP_INIT_SPREADS);
+  const [wpActiveHub,setWpActiveHub] = useState("SP15");
+  const [wpActiveType,setWpActiveType] = useState("monthly");
+  const [wpFutBlotter,setWpFutBlotter] = useState([]);
+  const [wpSpreadNear,setWpSpreadNear] = useState("m_Jan");
+  const [wpSpreadFar,setWpSpreadFar]   = useState("q_Q1");
+  const [wpSpreadHub,setWpSpreadHub]   = useState("SP15");
 
   function getWpPrice(hub, contractType, contractKey) {
-    if(hub==="SP15") {
-      if(contractType==="monthly") return wpSP15.monthly[contractKey]??50;
-      if(contractType==="quarterly") return wpSP15.quarterly[contractKey]??52;
-      if(contractType==="cal") return wpSP15.cal[contractKey]??55;
-    } else {
-      const sp15 = hub==="SP15"?0:0;
-      const base = contractType==="monthly"?wpSP15.monthly[contractKey]??50
-                 : contractType==="quarterly"?wpSP15.quarterly[contractKey]??52
-                 : wpSP15.cal[contractKey]??55;
-      const sprd = wpSpreads[hub]?.[contractType]?.[contractKey]??0;
-      return base + sprd;
-    }
+    const base = contractType==="monthly" ? (wpSP15.monthly[contractKey]??50)
+               : contractType==="quarterly" ? (wpSP15.quarterly[contractKey]??52)
+               : (wpSP15.cal[contractKey]??55);
+    if(hub==="SP15") return base;
+    const sprd = wpSpreads[hub]?.[contractType]?.[contractKey]??0;
+    return base + sprd;
   }
 
   function setWpSP15Price(contractType, key, val) {
