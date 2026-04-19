@@ -852,6 +852,7 @@ export default function CCADesk() {
   // ── Spread state
   const [spreadNear,setSpreadNear] = useState("Apr-26");
   const [spreadFar,setSpreadFar]   = useState("Dec-26");
+  const [futuresBlotter,setFuturesBlotter] = useState([]);
 
   function setQR(i,v){ setQuarterRates(p=>p.map((r,j)=>j===i?v:r)); }
   function commitPrice(v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) setAnchorPrice(n); }
@@ -1696,7 +1697,7 @@ export default function CCADesk() {
                       <div style={{fontSize:8,color:"#334155",marginTop:1}}>continuous carry</div>
                     </div>
                   </div>
-                  <div style={{borderTop:"1px solid #182030",paddingTop:8,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                  <div style={{borderTop:"1px solid #182030",paddingTop:8,display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,alignItems:"center"}}>
                     <div>
                       <div style={{fontSize:7,color:"#334155",marginBottom:2}}>DAYS</div>
                       <div style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>{spreadResult.days}d</div>
@@ -1712,6 +1713,29 @@ export default function CCADesk() {
                       <div style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>
                         {spreadNear.slice(0,6)} / {spreadFar.slice(0,6)}
                       </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <button onClick={()=>{
+                        const time=new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+                        setFuturesBlotter(b=>[...b,{
+                          id:Date.now(), time,
+                          near:spreadNear, far:spreadFar,
+                          nearPrice:spreadNearData.price,
+                          farPrice:spreadFarData.price,
+                          spread:spreadResult.spread,
+                          spreadPct:spreadResult.spreadPct,
+                          annualizedRate:spreadResult.annualizedRate,
+                          days:spreadResult.days,
+                        }]);
+                      }} style={{
+                        background:"#34d399",border:"none",borderRadius:2,
+                        color:"#070b10",fontFamily:"'IBM Plex Mono',monospace",
+                        fontSize:9,fontWeight:700,letterSpacing:"0.1em",
+                        padding:"8px 12px",cursor:"pointer",textTransform:"uppercase",
+                        whiteSpace:"nowrap",
+                      }}>
+                        + Add
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1777,6 +1801,106 @@ export default function CCADesk() {
               <span>F(T) = P_anchor x exp(r x dt) - piecewise quarterly rates - continuous compounding - Apr-26 to Dec-27</span>
               <span>Q = quarterly options expiry - anchor = Dec-26</span>
             </div>
+          </div>
+
+          {/* ── Futures Spread Blotter ── */}
+          <div style={{marginTop:20,background:"#0b0f18",border:"1px solid #182030",borderRadius:3,padding:"14px 16px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{display:"flex",alignItems:"baseline",gap:12}}>
+                <span style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase"}}>
+                  Futures Spread Blotter
+                </span>
+                <span style={{fontSize:9,color:"#334155"}}>
+                  {futuresBlotter.length} entr{futuresBlotter.length===1?"y":"ies"}
+                </span>
+                {futuresBlotter.length>0&&(
+                  <span style={{fontSize:9,color:"#475569"}}>
+                    Avg spread:&nbsp;
+                    <span style={{color:"#34d399",fontWeight:600}}>
+                      {(futuresBlotter.reduce((s,b)=>s+b.spread,0)/futuresBlotter.length).toFixed(3)}
+                    </span>
+                    &nbsp;|&nbsp;Avg carry:&nbsp;
+                    <span style={{color:"#38bdf8",fontWeight:600}}>
+                      {(futuresBlotter.reduce((s,b)=>s+b.annualizedRate,0)/futuresBlotter.length).toFixed(2)}%
+                    </span>
+                  </span>
+                )}
+              </div>
+              {futuresBlotter.length>0&&(
+                <button onClick={()=>setFuturesBlotter([])}
+                  style={{fontSize:8,color:"#f87171",background:"transparent",
+                    border:"1px solid #f8717133",borderRadius:2,padding:"3px 10px",
+                    cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace",letterSpacing:"0.08em"}}>
+                  CLEAR ALL
+                </button>
+              )}
+            </div>
+
+            {futuresBlotter.length===0 ? (
+              <div style={{padding:"24px 0",textAlign:"center",fontSize:9,color:"#1a2840",letterSpacing:"0.08em"}}>
+                No spreads logged — calculate a spread above and click + Add
+              </div>
+            ) : (
+              <div style={{overflowX:"auto"}}>
+                {/* Header */}
+                <div style={{
+                  display:"grid",
+                  gridTemplateColumns:"54px 80px 80px 90px 90px 90px 90px 90px 90px 28px",
+                  gap:"0 8px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",
+                  textTransform:"uppercase",padding:"3px 6px",
+                  borderBottom:"1px solid #182030",marginBottom:2,minWidth:700
+                }}>
+                  <span>Time</span>
+                  <span>Near</span>
+                  <span>Far</span>
+                  <span style={{textAlign:"right"}}>Near $</span>
+                  <span style={{textAlign:"right"}}>Far $</span>
+                  <span style={{textAlign:"right"}}>Spread</span>
+                  <span style={{textAlign:"right"}}>Spread %</span>
+                  <span style={{textAlign:"right"}}>Ann. Rate</span>
+                  <span style={{textAlign:"right"}}>Days</span>
+                  <span/>
+                </div>
+                {futuresBlotter.map((b,i)=>(
+                  <div key={b.id} className="rh" style={{
+                    display:"grid",
+                    gridTemplateColumns:"54px 80px 80px 90px 90px 90px 90px 90px 90px 28px",
+                    gap:"0 8px",alignItems:"center",padding:"7px 6px",
+                    borderBottom:"1px solid #0a0e14",minWidth:700,
+                    background:i%2===0?"transparent":"rgba(255,255,255,0.01)",
+                    borderLeft:`2px solid ${b.spread>=0?"#34d39933":"#f8717133"}`,
+                  }}>
+                    <span style={{fontSize:9,color:"#334155"}}>{b.time}</span>
+                    <span style={{fontSize:10,fontWeight:600,color:"#34d399"}}>{b.near}</span>
+                    <span style={{fontSize:10,fontWeight:600,color:"#f87171"}}>{b.far}</span>
+                    <span style={{fontSize:10,color:"#94a3b8",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>${b.nearPrice.toFixed(3)}</span>
+                    <span style={{fontSize:10,color:"#94a3b8",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>${b.farPrice.toFixed(3)}</span>
+                    <span style={{fontSize:12,fontWeight:700,textAlign:"right",fontVariantNumeric:"tabular-nums",
+                      color:b.spread>=0?"#34d399":"#f87171"}}>
+                      {b.spread>=0?"+":""}{b.spread.toFixed(3)}
+                    </span>
+                    <span style={{fontSize:10,textAlign:"right",fontVariantNumeric:"tabular-nums",
+                      color:b.spreadPct>=0?"#34d39988":"#f8717188"}}>
+                      {b.spreadPct>=0?"+":""}{b.spreadPct.toFixed(2)}%
+                    </span>
+                    <span style={{fontSize:12,fontWeight:600,textAlign:"right",fontVariantNumeric:"tabular-nums",color:"#38bdf8"}}>
+                      {b.annualizedRate.toFixed(2)}%
+                    </span>
+                    <span style={{fontSize:10,color:"#475569",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
+                      {b.days}d
+                    </span>
+                    <button onClick={()=>setFuturesBlotter(bl=>bl.filter(x=>x.id!==b.id))}
+                      style={{fontSize:9,color:"#334155",background:"transparent",border:"none",
+                        cursor:"pointer",padding:"2px",fontFamily:"'IBM Plex Mono',monospace",
+                        textAlign:"center"}}
+                      onMouseEnter={e=>{e.target.style.color="#f87171";}}
+                      onMouseLeave={e=>{e.target.style.color="#334155";}}>
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
