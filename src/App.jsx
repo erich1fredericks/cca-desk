@@ -931,6 +931,239 @@ export default function CCADesk() {
   const pctFmt = v=>`${(v*100).toFixed(1)}%`;
   const skewFmt = v=>`${v>=0?"+":""}${(v*100).toFixed(1)}%`;
 
+  // ── EOD Report generator ────────────────────────────────────────────────────
+  function generateEODReport() {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
+    const timeStr = now.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"});
+
+    // Build quarterly futures prices
+    const qExpiries = OPTIONS_EXPIRIES.map(e=>{
+      const key=MONTHS[e.month].slice(0,3)+"-"+String(e.year).slice(2);
+      const data=expiryPriceMap[key];
+      return {key, price:data?.price??0, T:data?.T??0};
+    });
+
+    // Build vol surface rows for each expiry
+    const volRows = qExpiries.map(exp=>{
+      const strikes=[15,20,25,30,35,40,45,50];
+      return {
+        expiry:exp.key,
+        F:exp.price,
+        T:exp.T,
+        atmVol:(atmVol*100).toFixed(1),
+        skew:(skew*100).toFixed(2),
+        convexity:(convexity*100).toFixed(2),
+        strikes:strikes.map(K=>{
+          const s=strikeVol(K,exp.price,atmVol,skew,convexity,perStrikeAdj[K]);
+          return {K, vol:(s*100).toFixed(1),
+            call:bsCall(exp.price,K,exp.T,r,s).toFixed(3),
+            put:bsPut(exp.price,K,exp.T,r,s).toFixed(3)};
+        })
+      };
+    });
+
+    // Quarterly futures spreads
+    const spreadRows=[];
+    for(let i=0;i<qExpiries.length-1;i++){
+      const near=qExpiries[i], far=qExpiries[i+1];
+      if(near.price>0&&far.price>0){
+        const sp=far.price-near.price;
+        const days=Math.round((far.T-near.T)*365);
+        const ann=Math.abs(near.T-far.T)>0?Math.log(far.price/near.price)/Math.abs(far.T-near.T)*100:0;
+        spreadRows.push({near:near.key,far:far.key,nearP:near.price,farP:far.price,spread:sp,ann});
+      }
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>CCA Derivatives Desk — EOD Report ${now.toLocaleDateString()}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600;700&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:#ffffff;color:#0f172a;font-family:'IBM Plex Sans',sans-serif;font-size:11px;padding:32px 40px;}
+  @media print{body{padding:16px 24px;} .no-print{display:none;} @page{size:A4 landscape;margin:1cm;}}
+  h1{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:#0f172a;margin-bottom:2px;}
+  .subtitle{font-size:10px;color:#64748b;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:24px;}
+  .section{margin-bottom:28px;}
+  .section-title{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;padding-bottom:5px;margin-bottom:10px;}
+  table{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:10px;}
+  th{text-align:right;font-weight:600;color:#64748b;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;padding:4px 8px;border-bottom:1px solid #e2e8f0;}
+  th:first-child{text-align:left;}
+  td{text-align:right;padding:4px 8px;border-bottom:1px solid #f1f5f9;color:#0f172a;}
+  td:first-child{text-align:left;font-weight:600;}
+  tr:nth-child(even){background:#f8fafc;}
+  .atm{background:#eff6ff !important;font-weight:700;}
+  .pos{color:#059669;}
+  .neg{color:#dc2626;}
+  .call-col{color:#1d4ed8;}
+  .put-col{color:#dc2626;}
+  .meta{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #e2e8f0;}
+  .meta-item{text-align:center;}
+  .meta-label{font-size:9px;color:#94a3b8;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:3px;}
+  .meta-val{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:700;color:#0f172a;}
+  .vol-params{display:flex;gap:24px;padding:10px 14px;background:#f8fafc;border-radius:4px;margin-bottom:12px;font-family:'IBM Plex Mono',monospace;}
+  .vp{text-align:center;}
+  .vp-label{font-size:8px;color:#94a3b8;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:2px;}
+  .vp-val{font-size:14px;font-weight:700;}
+  .print-btn{position:fixed;top:20px;right:20px;background:#0f172a;color:white;border:none;padding:10px 20px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.1em;cursor:pointer;border-radius:3px;}
+  .blotter-note{font-size:9px;color:#94a3b8;margin-top:4px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+  .expiry-block{margin-bottom:16px;}
+  .expiry-label{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:#1d4ed8;margin-bottom:6px;display:flex;justify-content:space-between;}
+</style>
+</head>
+<body>
+
+<button class="print-btn no-print" onclick="window.print()">PRINT / SAVE PDF</button>
+
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+  <div>
+    <h1>CCA Derivatives Desk</h1>
+    <div class="subtitle">End of Day Report — ${dateStr} — ${timeStr}</div>
+  </div>
+  <div style="text-align:right;font-family:'IBM Plex Mono',monospace;">
+    <div style="font-size:9px;color:#94a3b8;letter-spacing:0.1em;">DEC-26 ANCHOR</div>
+    <div style="font-size:24px;font-weight:700;color:#0f172a;">$${anchorPrice.toFixed(2)}</div>
+    <div style="font-size:9px;color:#94a3b8;">USD / tCO2e</div>
+  </div>
+</div>
+
+<!-- SECTION 1: FUTURES CURVE -->
+<div class="section">
+  <div class="section-title">Futures Curve — Quarterly Prices</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="text-align:left;">Contract</th>
+        <th>Futures Price</th>
+        <th>Days to Expiry</th>
+        <th>Carry Rate</th>
+        <th>vs Dec-26</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${qExpiries.map(e=>{
+        const diff=e.price-anchorPrice;
+        const diffPct=(diff/anchorPrice*100);
+        const days=Math.round(e.T*365);
+        const effRate=e.key.includes("26")?quarterRates[Math.floor(OPTIONS_EXPIRIES.find(x=>MONTHS[x.month].slice(0,3)+"-"+String(x.year).slice(2)===e.key)?.month/3)]??baseRate:baseRate;
+        return `<tr>
+          <td>${e.key}</td>
+          <td>$${e.price.toFixed(3)}</td>
+          <td>${days}d</td>
+          <td>${typeof effRate==="number"?effRate.toFixed(2):baseRate.toFixed(2)}%</td>
+          <td class="${diffPct>=0?"pos":"neg"}">${diffPct>=0?"+":""}${diffPct.toFixed(2)}%</td>
+        </tr>`;
+      }).join("")}
+    </tbody>
+  </table>
+</div>
+
+<!-- SECTION 2: CARRY RATES -->
+<div class="section">
+  <div class="section-title">Carry Rate Parameters</div>
+  <div class="vol-params">
+    <div class="vp"><div class="vp-label">Q1 Jan-Mar</div><div class="vp-val" style="color:#38bdf8;">${quarterRates[0].toFixed(2)}%</div></div>
+    <div class="vp"><div class="vp-label">Q2 Apr-Jun</div><div class="vp-val" style="color:#a78bfa;">${quarterRates[1].toFixed(2)}%</div></div>
+    <div class="vp"><div class="vp-label">Q3 Jul-Sep</div><div class="vp-val" style="color:#34d399;">${quarterRates[2].toFixed(2)}%</div></div>
+    <div class="vp"><div class="vp-label">Q4 Oct-Dec</div><div class="vp-val" style="color:#fb923c;">${quarterRates[3].toFixed(2)}%</div></div>
+    <div class="vp" style="border-left:1px solid #e2e8f0;padding-left:24px;"><div class="vp-label">2027+ Base</div><div class="vp-val" style="color:#64748b;">${baseRate.toFixed(2)}%</div></div>
+  </div>
+</div>
+
+<!-- SECTION 3: CALENDAR SPREADS -->
+<div class="section">
+  <div class="section-title">Calendar Spreads — Sequential Quarterly</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="text-align:left;">Spread</th>
+        <th>Near Price</th>
+        <th>Far Price</th>
+        <th>Spread $</th>
+        <th>Ann. Carry</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${spreadRows.map(s=>`<tr>
+        <td>${s.near} / ${s.far}</td>
+        <td>$${s.nearP.toFixed(3)}</td>
+        <td>$${s.farP.toFixed(3)}</td>
+        <td class="${s.spread>=0?"pos":"neg"}">${s.spread>=0?"+":""}${s.spread.toFixed(3)}</td>
+        <td class="pos">${s.ann.toFixed(2)}%</td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+  ${futuresBlotter.length>0?`
+  <div class="blotter-note" style="margin-top:8px;font-family:'IBM Plex Mono',monospace;">
+    Logged spreads today: ${futuresBlotter.length} entry/entries
+  </div>
+  <table style="margin-top:6px;">
+    <thead><tr><th style="text-align:left;">Time</th><th style="text-align:left;">Near</th><th style="text-align:left;">Far</th><th>Spread</th><th>Ann. Rate</th></tr></thead>
+    <tbody>
+      ${futuresBlotter.map(b=>`<tr><td>${b.time}</td><td>${b.near}</td><td>${b.far}</td><td class="${b.spread>=0?"pos":"neg"}">${b.spread>=0?"+":""}${b.spread.toFixed(3)}</td><td class="pos">${b.annualizedRate.toFixed(2)}%</td></tr>`).join("")}
+    </tbody>
+  </table>`:""}
+</div>
+
+<!-- SECTION 4: VOLATILITY MARKS -->
+<div class="section">
+  <div class="section-title">Volatility Surface Marks</div>
+  <div class="vol-params" style="margin-bottom:16px;">
+    <div class="vp"><div class="vp-label">ATM Vol</div><div class="vp-val" style="color:#38bdf8;">${(atmVol*100).toFixed(1)}%</div></div>
+    <div class="vp"><div class="vp-label">Skew</div><div class="vp-val" style="color:#fb923c;">${skew>=0?"+":""}${(skew*100).toFixed(1)}%</div></div>
+    <div class="vp"><div class="vp-label">Convexity</div><div class="vp-val" style="color:#a78bfa;">${(convexity*100).toFixed(1)}%</div></div>
+    <div class="vp" style="border-left:1px solid #e2e8f0;padding-left:24px;"><div class="vp-label">Model</div><div class="vp-val" style="font-size:10px;color:#64748b;">SVI-inspired</div></div>
+  </div>
+
+  ${volRows.filter((_,i)=>i<4).map(vr=>`
+  <div class="expiry-block">
+    <div class="expiry-label">
+      <span>${vr.expiry}</span>
+      <span style="color:#0f172a;">F = $${vr.F.toFixed(3)} &nbsp;|&nbsp; T = ${Math.round(vr.T*365)}d &nbsp;|&nbsp; ATM vol = ${vr.atmVol}%</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left;">Strike</th>
+          ${vr.strikes.map(s=>`<th style="color:${Math.abs(s.K-vr.F)<1?"#1d4ed8":"#64748b"}">${s.K}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Vol %</td>
+          ${vr.strikes.map(s=>`<td class="${Math.abs(s.K-vr.F)<1?"atm":""}">${s.vol}%</td>`).join("")}
+        </tr>
+        <tr>
+          <td style="color:#1d4ed8;">Call $</td>
+          ${vr.strikes.map(s=>`<td class="call-col ${Math.abs(s.K-vr.F)<1?"atm":""}">${s.call}</td>`).join("")}
+        </tr>
+        <tr>
+          <td style="color:#dc2626;">Put $</td>
+          ${vr.strikes.map(s=>`<td class="put-col ${Math.abs(s.K-vr.F)<1?"atm":""}">${s.put}</td>`).join("")}
+        </tr>
+      </tbody>
+    </table>
+  </div>`).join("")}
+</div>
+
+<div style="margin-top:32px;padding-top:12px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;font-size:8px;color:#94a3b8;font-family:'IBM Plex Mono',monospace;">
+  <span>CCA Derivatives Desk — Confidential</span>
+  <span>Generated ${dateStr} at ${timeStr} — Black-Scholes Futures Options Model</span>
+</div>
+
+</body>
+</html>`;
+
+    const blob = new Blob([html], {type:"text/html"});
+    const url  = URL.createObjectURL(blob);
+    const win  = window.open(url,"_blank","width=1100,height=850");
+    if(win) win.focus();
+  }
+
   return (
     <div style={{minHeight:"100vh",background:"#070b10",color:"#d8e2ef",fontFamily:"'IBM Plex Mono','Courier New',monospace",padding:"20px 18px"}}>
       <style>{`
@@ -961,8 +1194,21 @@ export default function CCADesk() {
           <span style={{color:"#182030"}}>|</span>
           <span style={{fontSize:9,color:"#1a2840",letterSpacing:"0.1em"}}>Options &amp; Futures Desk · Apr-26 → Dec-27</span>
         </div>
-        <div style={{fontSize:21,fontWeight:600,color:"#f0f4fa",fontFamily:"'IBM Plex Sans',sans-serif",letterSpacing:"-0.01em"}}>
-          CCA Derivatives Pricer
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:21,fontWeight:600,color:"#f0f4fa",fontFamily:"'IBM Plex Sans',sans-serif",letterSpacing:"-0.01em"}}>
+            CCA Derivatives Pricer
+          </div>
+          <button onClick={generateEODReport} style={{
+            background:"#0f172a",border:"1px solid #334155",borderRadius:3,
+            color:"#f0f4fa",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,
+            fontWeight:700,letterSpacing:"0.12em",padding:"8px 16px",
+            cursor:"pointer",textTransform:"uppercase",
+            display:"flex",alignItems:"center",gap:8,transition:"all 0.15s",
+          }}
+          onMouseEnter={e=>{e.currentTarget.style.background="#1e293b";e.currentTarget.style.borderColor="#38bdf8";e.currentTarget.style.color="#38bdf8";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="#0f172a";e.currentTarget.style.borderColor="#334155";e.currentTarget.style.color="#f0f4fa";}}>
+            <span style={{fontSize:14}}>⬡</span> EOD Report
+          </button>
         </div>
       </div>
 
