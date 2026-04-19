@@ -251,6 +251,10 @@ export default function CCADesk() {
   const [greeksMode,setGreeksMode]         = useState(false);
   const [tab,setTab]                       = useState(0);
 
+  // ── Spread state
+  const [spreadNear,setSpreadNear] = useState("Apr-26");
+  const [spreadFar,setSpreadFar]   = useState("Dec-26");
+
   function setQR(i,v){ setQuarterRates(p=>p.map((r,j)=>j===i?v:r)); }
   function commitPrice(v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) setAnchorPrice(n); }
 
@@ -269,6 +273,28 @@ export default function CCADesk() {
     }
     return map;
   },[curve]);
+
+  // ── Spread calculator
+  const curveMap = useMemo(()=>{
+    const m={};
+    curve.forEach(c=>{ m[c.label]={price:c.price,month:c.month,year:c.year}; });
+    return m;
+  },[curve]);
+
+  const spreadNearData = curveMap[spreadNear];
+  const spreadFarData  = curveMap[spreadFar];
+  const spreadResult = useMemo(()=>{
+    if(!spreadNearData||!spreadFarData||spreadNear===spreadFar) return null;
+    const nearDate = new Date(spreadNearData.year, spreadNearData.month, 15);
+    const farDate  = new Date(spreadFarData.year,  spreadFarData.month,  15);
+    const days = Math.round((farDate - nearDate)/(24*3600*1000));
+    const spread = spreadFarData.price - spreadNearData.price;
+    const spreadPct = (spread / spreadNearData.price)*100;
+    const tYears = Math.abs(days)/365;
+    // annualized: ln(far/near) / T
+    const annualizedRate = tYears > 0 ? (Math.log(spreadFarData.price/spreadNearData.price)/tYears)*100 : 0;
+    return { spread, spreadPct, days, annualizedRate };
+  },[spreadNear,spreadFar,spreadNearData,spreadFarData]);
 
   const activeExp = expiryPriceMap[selectedExpiry] || Object.values(expiryPriceMap)[0];
   const F   = activeExp?.price ?? anchorPrice;
@@ -648,56 +674,204 @@ export default function CCADesk() {
 
       {/* ════════════ FUTURES CURVE TAB ════════════ */}
       {tab===2 && (
-        <div style={{overflowX:"auto"}}>
-          {Object.entries(byYear).map(([year,months])=>{
-            const yr=parseInt(year);
-            return (
-              <div key={year} style={{marginBottom:18}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #182030",paddingBottom:5,marginBottom:3}}>
-                  <span style={{fontSize:10,fontWeight:600,color:yr===2026?"#38bdf8":"#475569",letterSpacing:"0.1em"}}>{year}</span>
-                  {yr===2026
-                    ?<span style={{fontSize:8,color:"#38bdf8",letterSpacing:"0.08em"}}>Q RATES:&nbsp;{quarterRates.map((rate,i)=><span key={i} style={{color:Q_COLORS[i]}}>{Q_SHORT[i]}:{rate.toFixed(2)}% </span>)}</span>
-                    :<span style={{fontSize:8,color:"#475569",letterSpacing:"0.07em"}}>BASE RATE {baseRate.toFixed(2)}%</span>
-                  }
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"100px 110px 36px 1fr 88px 82px",gap:"0 10px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",padding:"3px 8px",marginBottom:1}}>
-                  <span>Contract</span><span style={{textAlign:"right"}}>Price</span><span style={{textAlign:"center"}}>Qtr</span><span>Carry</span><span style={{textAlign:"right"}}>Rate</span><span style={{textAlign:"right"}}>vs Anchor</span>
-                </div>
-                {months.map(c=>{
-                  const bw=((c.price-minP)/pRange)*100;
-                  const diff=(c.price-anchorPrice)/anchorPrice*100;
-                  const qc=c.inAnchorYear?Q_COLORS[c.quarter]:"#475569";
-                  return (
-                    <div key={c.label} className="rh" style={{
-                      display:"grid",gridTemplateColumns:"100px 110px 36px 1fr 88px 82px",
-                      gap:"0 10px",alignItems:"center",padding:"5px 8px",borderBottom:"1px solid #090d12",
-                      background:c.isAnchor?"rgba(56,189,248,0.09)":c.isQExpiry?"rgba(56,189,248,0.03)":"transparent",
-                      borderLeft:c.isAnchor?"2px solid #38bdf8":c.isQExpiry?"2px solid #1a3050":"2px solid transparent",
-                    }}>
-                      <span style={{fontSize:11,fontWeight:c.isQExpiry?600:400,color:c.isAnchor?"#38bdf8":c.isQExpiry?"#7dd3fc":"#4a5d70",letterSpacing:"0.04em"}}>
-                        {c.label}
-                        {c.isAnchor&&<span style={{fontSize:6,marginLeft:3,color:"#38bdf8"}}>●</span>}
-                        {c.isQExpiry&&!c.isAnchor&&<span style={{fontSize:6,marginLeft:3,color:"#7dd3fc55"}}>Q</span>}
-                      </span>
-                      <span style={{fontSize:12,fontWeight:600,color:c.isAnchor?"#38bdf8":"#d0dcea",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>${c.price.toFixed(3)}</span>
-                      <span style={{textAlign:"center",fontSize:7,fontWeight:700,color:qc}}>{c.inAnchorYear?Q_SHORT[c.quarter]:"—"}</span>
-                      <div style={{height:4,background:"#090d12",borderRadius:1,overflow:"hidden"}}>
-                        <div style={{width:`${bw}%`,height:"100%",minWidth:2,borderRadius:1,
-                          background:c.inAnchorYear?`linear-gradient(90deg,${qc}44,${qc})`:"linear-gradient(90deg,#1a2030,#2d3d50)"}}/>
+        <div>
+          {/* ── Rate Sliders + Spread Generator ── */}
+          <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap",alignItems:"stretch"}}>
+
+            {/* Quarter rate sliders */}
+            <div className="panel" style={{flex:1,minWidth:320}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:14}}>
+                2026 Quarterly Carry Rates
+              </div>
+              {quarterRates.map((rate,qi)=>{
+                const pct=((rate-0)/(15-0)*100).toFixed(1);
+                return (
+                  <div key={qi} style={{marginBottom:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{width:10,height:10,borderRadius:2,background:Q_COLORS[qi]}}/>
+                        <span style={{fontSize:9,color:Q_COLORS[qi],letterSpacing:"0.1em"}}>
+                          {Q_SHORT[qi]}
+                          <span style={{color:"#334155",marginLeft:6,fontSize:8}}>
+                            {qi===0?"Jan-Mar":qi===1?"Apr-Jun":qi===2?"Jul-Sep":"Oct-Dec"}
+                          </span>
+                        </span>
                       </div>
-                      <span style={{fontSize:9,color:qc,textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{c.effectiveRate.toFixed(2)}%</span>
-                      <span style={{fontSize:10,fontWeight:500,textAlign:"right",fontVariantNumeric:"tabular-nums",color:c.isAnchor?"#475569":diff>=0?"#34d399":"#f87171"}}>
-                        {c.isAnchor?"anchor":`${diff>=0?"+":""}${diff.toFixed(2)}%`}
+                      <span style={{fontSize:16,fontWeight:600,color:Q_COLORS[qi],fontFamily:"'IBM Plex Mono',monospace"}}>
+                        {rate.toFixed(2)}<span style={{fontSize:11,color:"#334155"}}>%</span>
                       </span>
                     </div>
-                  );
-                })}
+                    <input type="range" min={0} max={15} step={0.05} value={rate}
+                      onChange={e=>setQR(qi,parseFloat(e.target.value))}
+                      style={{width:"100%",background:`linear-gradient(to right,${Q_COLORS[qi]} ${pct}%,#182030 ${pct}%)`,accentColor:Q_COLORS[qi]}}
+                    />
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:7,color:"#1e2d3d",marginTop:2}}>
+                      <span>0%</span><span>15%</span>
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{borderTop:"1px solid #182030",paddingTop:12,marginTop:2}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                  <span style={{fontSize:9,color:"#64748b",letterSpacing:"0.1em"}}>2027+ Base Rate</span>
+                  <span style={{fontSize:16,fontWeight:600,color:"#64748b",fontFamily:"'IBM Plex Mono',monospace"}}>
+                    {baseRate.toFixed(2)}<span style={{fontSize:11,color:"#334155"}}>%</span>
+                  </span>
+                </div>
+                <input type="range" min={0} max={15} step={0.05} value={baseRate}
+                  onChange={e=>setBaseRate(parseFloat(e.target.value))}
+                  style={{width:"100%",background:`linear-gradient(to right,#64748b ${((baseRate/15)*100).toFixed(1)}%,#182030 ${((baseRate/15)*100).toFixed(1)}%)`,accentColor:"#64748b"}}
+                />
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:7,color:"#1e2d3d",marginTop:2}}>
+                  <span>0%</span><span>15%</span>
+                </div>
               </div>
-            );
-          })}
-          <div style={{marginTop:16,borderTop:"1px solid #182030",paddingTop:9,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
-            <span>F(T) = P_anchor · exp(∫r(t)dt) · piecewise quarterly rates · continuous compounding · Apr-26 → Dec-27</span>
-            <span>Q = quarterly options expiry · ● = Dec-26 anchor</span>
+            </div>
+
+            {/* Spread Generator */}
+            <div className="panel" style={{flex:1,minWidth:300}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:14}}>
+                Spread Generator
+              </div>
+              {/* Leg selectors */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 32px 1fr",gap:8,alignItems:"center",marginBottom:16}}>
+                <div>
+                  <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:5}}>NEAR LEG</div>
+                  <select
+                    value={spreadNear}
+                    onChange={e=>setSpreadNear(e.target.value)}
+                    style={{width:"100%",background:"#0b0f18",border:"1px solid #182030",color:"#34d399",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,padding:"6px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}
+                  >
+                    {curve.filter(c=>c.isQExpiry||c.isAnchor).map(c=>(
+                      <option key={c.label} value={c.label}>{c.label}</option>
+                    ))}
+                  </select>
+                  {spreadNearData && (
+                    <div style={{fontSize:11,color:"#34d399",fontWeight:600,marginTop:4,textAlign:"center"}}>
+                      ${spreadNearData.price.toFixed(3)}
+                    </div>
+                  )}
+                </div>
+                <div style={{textAlign:"center",fontSize:14,color:"#334155",fontWeight:600}}>/</div>
+                <div>
+                  <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:5}}>FAR LEG</div>
+                  <select
+                    value={spreadFar}
+                    onChange={e=>setSpreadFar(e.target.value)}
+                    style={{width:"100%",background:"#0b0f18",border:"1px solid #182030",color:"#f87171",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,padding:"6px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}
+                  >
+                    {curve.filter(c=>c.isQExpiry||c.isAnchor).map(c=>(
+                      <option key={c.label} value={c.label}>{c.label}</option>
+                    ))}
+                  </select>
+                  {spreadFarData && (
+                    <div style={{fontSize:11,color:"#f87171",fontWeight:600,marginTop:4,textAlign:"center"}}>
+                      ${spreadFarData.price.toFixed(3)}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Spread results */}
+              {spreadResult && (
+                <div style={{background:"#070b10",border:"1px solid #182030",borderRadius:3,padding:"12px 14px"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:3}}>SPREAD</div>
+                      <div style={{fontSize:22,fontWeight:600,color:spreadResult.spread>=0?"#34d399":"#f87171",fontFamily:"'IBM Plex Mono',monospace"}}>
+                        {spreadResult.spread>=0?"+":""}{spreadResult.spread.toFixed(3)}
+                      </div>
+                      <div style={{fontSize:8,color:"#334155",marginTop:1}}>USD / tCO2e</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:3}}>ANNUALIZED RATE</div>
+                      <div style={{fontSize:22,fontWeight:600,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace"}}>
+                        {spreadResult.annualizedRate.toFixed(2)}<span style={{fontSize:13,color:"#334155"}}>%</span>
+                      </div>
+                      <div style={{fontSize:8,color:"#334155",marginTop:1}}>continuous carry</div>
+                    </div>
+                  </div>
+                  <div style={{borderTop:"1px solid #182030",paddingTop:8,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                    <div>
+                      <div style={{fontSize:7,color:"#334155",marginBottom:2}}>DAYS</div>
+                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>{spreadResult.days}d</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:7,color:"#334155",marginBottom:2}}>SPREAD %</div>
+                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>
+                        {spreadResult.spreadPct>=0?"+":""}{spreadResult.spreadPct.toFixed(2)}%
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:7,color:"#334155",marginBottom:2}}>NEAR / FAR</div>
+                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>
+                        {spreadNear.slice(0,6)} / {spreadFar.slice(0,6)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {!spreadResult && (
+                <div style={{textAlign:"center",padding:"20px 0",fontSize:9,color:"#1e2d3d"}}>
+                  Select two different contracts to calculate spread
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Curve Table ── */}
+          <div style={{overflowX:"auto"}}>
+            {Object.entries(byYear).map(([year,months])=>{
+              const yr=parseInt(year);
+              return (
+                <div key={year} style={{marginBottom:18}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #182030",paddingBottom:5,marginBottom:3}}>
+                    <span style={{fontSize:10,fontWeight:600,color:yr===2026?"#38bdf8":"#475569",letterSpacing:"0.1em"}}>{year}</span>
+                    {yr===2026
+                      ?<span style={{fontSize:8,color:"#38bdf8",letterSpacing:"0.08em"}}>Q RATES:&nbsp;{quarterRates.map((rate,i)=><span key={i} style={{color:Q_COLORS[i]}}>{Q_SHORT[i]}:{rate.toFixed(2)}% </span>)}</span>
+                      :<span style={{fontSize:8,color:"#475569",letterSpacing:"0.07em"}}>BASE RATE {baseRate.toFixed(2)}%</span>
+                    }
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"100px 110px 36px 1fr 88px 82px",gap:"0 10px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",padding:"3px 8px",marginBottom:1}}>
+                    <span>Contract</span><span style={{textAlign:"right"}}>Price</span><span style={{textAlign:"center"}}>Qtr</span><span>Carry</span><span style={{textAlign:"right"}}>Rate</span><span style={{textAlign:"right"}}>vs Anchor</span>
+                  </div>
+                  {months.map(c=>{
+                    const bw=((c.price-minP)/pRange)*100;
+                    const diff=(c.price-anchorPrice)/anchorPrice*100;
+                    const qc=c.inAnchorYear?Q_COLORS[c.quarter]:"#475569";
+                    const isSpreadLeg=c.label===spreadNear||c.label===spreadFar;
+                    return (
+                      <div key={c.label} className="rh" style={{
+                        display:"grid",gridTemplateColumns:"100px 110px 36px 1fr 88px 82px",
+                        gap:"0 10px",alignItems:"center",padding:"5px 8px",borderBottom:"1px solid #090d12",
+                        background:c.isAnchor?"rgba(56,189,248,0.09)":isSpreadLeg?"rgba(52,211,153,0.05)":c.isQExpiry?"rgba(56,189,248,0.03)":"transparent",
+                        borderLeft:c.isAnchor?"2px solid #38bdf8":isSpreadLeg?"2px solid #34d399":c.isQExpiry?"2px solid #1a3050":"2px solid transparent",
+                      }}>
+                        <span style={{fontSize:11,fontWeight:c.isQExpiry?600:400,color:c.isAnchor?"#38bdf8":isSpreadLeg?"#34d399":c.isQExpiry?"#7dd3fc":"#4a5d70",letterSpacing:"0.04em"}}>
+                          {c.label}
+                          {c.isAnchor&&<span style={{fontSize:6,marginLeft:3,color:"#38bdf8"}}>●</span>}
+                          {c.isQExpiry&&!c.isAnchor&&<span style={{fontSize:6,marginLeft:3,color:"#7dd3fc55"}}>Q</span>}
+                        </span>
+                        <span style={{fontSize:12,fontWeight:600,color:c.isAnchor?"#38bdf8":"#d0dcea",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>${c.price.toFixed(3)}</span>
+                        <span style={{textAlign:"center",fontSize:7,fontWeight:700,color:qc}}>{c.inAnchorYear?Q_SHORT[c.quarter]:"—"}</span>
+                        <div style={{height:4,background:"#090d12",borderRadius:1,overflow:"hidden"}}>
+                          <div style={{width:`${bw}%`,height:"100%",minWidth:2,borderRadius:1,
+                            background:c.inAnchorYear?`linear-gradient(90deg,${qc}44,${qc})`:"linear-gradient(90deg,#1a2030,#2d3d50)"}}/>
+                        </div>
+                        <span style={{fontSize:9,color:qc,textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{c.effectiveRate.toFixed(2)}%</span>
+                        <span style={{fontSize:10,fontWeight:500,textAlign:"right",fontVariantNumeric:"tabular-nums",color:c.isAnchor?"#475569":diff>=0?"#34d399":"#f87171"}}>
+                          {c.isAnchor?"anchor":`${diff>=0?"+":""}${diff.toFixed(2)}%`}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            <div style={{marginTop:16,borderTop:"1px solid #182030",paddingTop:9,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
+              <span>F(T) = P_anchor x exp(r x dt) - piecewise quarterly rates - continuous compounding - Apr-26 to Dec-27</span>
+              <span>Q = quarterly options expiry - anchor = Dec-26</span>
+            </div>
           </div>
         </div>
       )}
