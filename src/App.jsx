@@ -289,7 +289,7 @@ function VolSlider({label, value, min, max, step, onChange, color="#38bdf8", for
       <div style={{display:"flex",justifyContent:"space-between",fontSize:7,color:"#1e2d3d",marginTop:2}}>
         <span>{format?format(min):min}</span><span>{format?format(max):max}</span>
       </div>
-    </svg>
+    </div>
   );
 }
 
