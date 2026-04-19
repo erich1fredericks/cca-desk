@@ -654,7 +654,9 @@ function PopoutChain() {
 
   return (
     <div style={{minHeight:"100vh",background:"#070b10",color:"#d8e2ef",
-      fontFamily:"'IBM Plex Mono','Courier New',monospace",padding:"16px 20px"}}>
+      fontFamily:"'IBM Plex Mono','Courier New',monospace",padding:"0"}}>
+      <div style={{position:"sticky",top:0,zIndex:20,background:"#070b10",
+        borderBottom:"1px solid #182030",padding:"12px 20px 10px"}}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap');
         *{box-sizing:border-box;}
@@ -710,24 +712,31 @@ function PopoutChain() {
           );
         })}
       </div>
+      </div>
 
-      {/* Chain */}
+      <div style={{padding:"0 20px 16px"}}>
+      {/* Chain — strike in middle, sticky col header */}
       <div style={{overflowX:"auto"}}>
-        <div style={{minWidth:520}}>
-          <div style={{display:"grid",gridTemplateColumns:"120px 3px 130px 100px 90px 3px 130px 100px 90px",
-            padding:"6px 10px",borderBottom:"2px solid #1a2840",marginBottom:0}}>
-            <div style={{display:"grid",gridTemplateColumns:"60px 56px"}}>
-              <span style={{fontSize:8,color:"#2d3d50",letterSpacing:"0.14em",textTransform:"uppercase"}}>Strike</span>
-              <span style={{fontSize:8,color:"#a78bfa44",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"center"}}>Vol%</span>
+        <div style={{minWidth:560}}>
+          {/* Sticky column header */}
+          <div style={{
+            position:"sticky",top:0,zIndex:10,
+            background:"#070b10",
+            borderBottom:"2px solid #1a2840",
+            display:"grid",
+            gridTemplateColumns:"100px 90px 3px 140px 3px 90px 100px",
+            padding:"7px 10px",
+          }}>
+            <span style={{fontSize:9,color:"#34d399",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",paddingRight:8,fontWeight:700}}>CALL</span>
+            <span style={{fontSize:8,color:"#34d39988",textTransform:"uppercase",textAlign:"right",paddingRight:6}}>Delta</span>
+            <span/>
+            <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:10}}>
+              <span style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
+              <span style={{fontSize:8,color:"#a78bfa44",letterSpacing:"0.08em",textTransform:"uppercase"}}>Vol%</span>
             </div>
             <span/>
-            <span style={{fontSize:9,color:"#34d399",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",fontWeight:700}}>CALL</span>
-            <span style={{fontSize:8,color:"#34d39988",textTransform:"uppercase",textAlign:"right"}}>Delta</span>
-            <span style={{fontSize:8,color:"#34d39944",textTransform:"uppercase",textAlign:"right"}}>Vega</span>
-            <span/>
-            <span style={{fontSize:9,color:"#f87171",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",fontWeight:700}}>PUT</span>
-            <span style={{fontSize:8,color:"#f8717188",textTransform:"uppercase",textAlign:"right"}}>Delta</span>
-            <span style={{fontSize:8,color:"#f8717144",textTransform:"uppercase",textAlign:"right"}}>Vega</span>
+            <span style={{fontSize:8,color:"#f8717188",textTransform:"uppercase",textAlign:"left",paddingLeft:6}}>Delta</span>
+            <span style={{fontSize:9,color:"#f87171",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"left",paddingLeft:8,fontWeight:700}}>PUT</span>
           </div>
 
           {rows.map((row,idx)=>{
@@ -737,7 +746,7 @@ function PopoutChain() {
             return (
               <div key={row.K} style={{
                 display:"grid",
-                gridTemplateColumns:"120px 3px 130px 100px 90px 3px 130px 100px 90px",
+                gridTemplateColumns:"100px 90px 3px 140px 3px 90px 100px",
                 padding:isATM?"11px 10px":"5px 10px",
                 borderBottom:"1px solid",
                 borderBottomColor:isNear?"#141e2c":"#0b0e14",
@@ -746,20 +755,8 @@ function PopoutChain() {
                 alignItems:"center",
                 transition:"background 0.1s",
               }}>
-                <div style={{display:"grid",gridTemplateColumns:"60px 56px",alignItems:"center"}}>
-                  <span style={{
-                    fontSize:isATM?17:14,fontWeight:isATM?800:cItm||pItm?600:400,
-                    color:isATM?"#38bdf8":cItm?"#94a3b8":pItm?"#94a3b8":"#3a4d5e",
-                    fontVariantNumeric:"tabular-nums"
-                  }}>
-                    {row.K}
-                  </span>
-                  <span style={{fontSize:9,color:"#a78bfa55",textAlign:"center",fontVariantNumeric:"tabular-nums"}}>
-                    {(row.s*100).toFixed(1)}
-                  </span>
-                </div>
-                <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"2px 6px"}}/>
-                <div style={{textAlign:"right",paddingRight:10}}>
+                {/* Call price */}
+                <div style={{textAlign:"right",paddingRight:8}}>
                   <span style={{
                     fontSize:isATM?17:14,fontWeight:isATM?700:600,
                     color:row.call<0.005?"#1a2535":cItm?"#34d399":isATM?"#7dd3fc":"#2d4a5e",
@@ -768,14 +765,33 @@ function PopoutChain() {
                     {row.call<0.005?"—":row.call.toFixed(2)}
                   </span>
                 </div>
-                <span style={{fontSize:isATM?12:11,color:cItm?"#34d39988":"#1e3045",textAlign:"right",fontVariantNumeric:"tabular-nums",paddingRight:6}}>
+                {/* Call delta */}
+                <span style={{fontSize:isATM?12:11,color:cItm?"#34d39988":"#1e3045",textAlign:"right",paddingRight:10,fontVariantNumeric:"tabular-nums"}}>
                   {row.cDelta.toFixed(2)}
                 </span>
-                <span style={{fontSize:9,color:"#162030",textAlign:"right",paddingRight:8,fontVariantNumeric:"tabular-nums"}}>
-                  {row.vega.toFixed(2)}
+                {/* Left divider */}
+                <div style={{width:1,background:isATM?"#38bdf833":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                {/* Strike + vol CENTRE */}
+                <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:12}}>
+                  <span style={{
+                    fontSize:isATM?18:15,fontWeight:isATM?800:500,
+                    color:isATM?"#38bdf8":"#4a5d70",
+                    fontVariantNumeric:"tabular-nums"
+                  }}>
+                    {row.K}
+                  </span>
+                  <span style={{fontSize:9,color:"#a78bfa55",fontVariantNumeric:"tabular-nums"}}>
+                    {(row.s*100).toFixed(1)}
+                  </span>
+                </div>
+                {/* Right divider */}
+                <div style={{width:1,background:isATM?"#38bdf833":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                {/* Put delta */}
+                <span style={{fontSize:isATM?12:11,color:pItm?"#f8717188":"#1e3045",textAlign:"left",paddingLeft:8,fontVariantNumeric:"tabular-nums"}}>
+                  {row.pDelta.toFixed(2)}
                 </span>
-                <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"2px 6px"}}/>
-                <div style={{textAlign:"right",paddingRight:10}}>
+                {/* Put price */}
+                <div style={{textAlign:"left",paddingLeft:8}}>
                   <span style={{
                     fontSize:isATM?17:14,fontWeight:isATM?700:600,
                     color:row.put<0.005?"#1a2535":pItm?"#f87171":isATM?"#fca5a5":"#2d4a5e",
@@ -784,12 +800,6 @@ function PopoutChain() {
                     {row.put<0.005?"—":row.put.toFixed(2)}
                   </span>
                 </div>
-                <span style={{fontSize:isATM?12:11,color:pItm?"#f8717188":"#1e3045",textAlign:"right",fontVariantNumeric:"tabular-nums",paddingRight:6}}>
-                  {row.pDelta.toFixed(2)}
-                </span>
-                <span style={{fontSize:9,color:"#162030",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
-                  {row.vega.toFixed(2)}
-                </span>
               </div>
             );
           })}
@@ -798,7 +808,8 @@ function PopoutChain() {
 
       <div style={{marginTop:10,display:"flex",justifyContent:"space-between",fontSize:8,color:"#182030"}}>
         <span>BS Futures Options - CCA Desk</span>
-        <span>ITM calls ▶ green   ITM puts ▶ red   ATM ▶ highlighted row</span>
+        <span>ITM calls green  |  ITM puts red  |  ATM highlighted</span>
+      </div>
       </div>
     </div>
   );
@@ -1030,8 +1041,15 @@ export default function CCADesk() {
       {/* ════════════ MARKET VIEW TAB (read-only clean chain) ════════════ */}
       {tab===0 && (
         <div>
-          {/* Compact expiry bar */}
-          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:18,flexWrap:"wrap"}}>
+          {/* Sticky expiry + info bar */}
+          <div style={{
+            position:"sticky",top:0,zIndex:20,
+            background:"#070b10",
+            borderBottom:"1px solid #182030",
+            paddingBottom:10,marginBottom:12,
+            paddingTop:4,
+          }}>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
             {OPTIONS_EXPIRIES.map(e=>{
               const key=`${MONTHS[e.month].slice(0,3)}-${String(e.year).slice(2)}`;
               const isSel=selectedExpiry===key;
@@ -1082,100 +1100,96 @@ export default function CCADesk() {
               </button>
             </div>
           </div>
+          </div>
 
-          {/* Clean read-only chain */}
+          {/* Clean read-only chain — strike in middle, sticky header */}
           <div style={{overflowX:"auto"}}>
-            <div style={{minWidth:560}}>
-              {/* Header row */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 3px 120px 90px 80px 3px 120px 90px 80px",
-                gap:"0 0",padding:"8px 12px",borderBottom:"2px solid #182030",marginBottom:0}}>
-                <div style={{display:"grid",gridTemplateColumns:"60px 60px",gap:0}}>
-                  <span style={{fontSize:9,color:"#334155",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
-                  <span style={{fontSize:9,color:"#a78bfa66",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"center"}}>Vol</span>
+            <div style={{minWidth:600}}>
+              {/* Sticky col header */}
+              <div style={{
+                position:"sticky",top:0,zIndex:10,
+                background:"#070b10",
+                borderBottom:"2px solid #1a2840",
+                display:"grid",
+                gridTemplateColumns:"90px 90px 3px 130px 70px 3px 90px 90px",
+                padding:"7px 12px",
+              }}>
+                <span style={{fontSize:9,color:"#34d399",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",paddingRight:8,fontWeight:700}}>CALL</span>
+                <span style={{fontSize:9,color:"#34d39988",letterSpacing:"0.08em",textTransform:"uppercase",textAlign:"right",paddingRight:4}}>Delta</span>
+                <span/>
+                <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
+                  <span style={{fontSize:8,color:"#a78bfa55",letterSpacing:"0.08em",textTransform:"uppercase"}}>Vol%</span>
                 </div>
                 <span/>
-                <span style={{fontSize:9,color:"#34d399",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",fontWeight:600}}>CALL</span>
-                <span style={{fontSize:9,color:"#34d39988",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>Delta</span>
-                <span style={{fontSize:9,color:"#34d39966",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>Vega</span>
                 <span/>
-                <span style={{fontSize:9,color:"#f87171",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",fontWeight:600}}>PUT</span>
-                <span style={{fontSize:9,color:"#f8717188",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>Delta</span>
-                <span style={{fontSize:9,color:"#f8717166",letterSpacing:"0.1em",textTransform:"uppercase",textAlign:"right"}}>Vega</span>
+                <span style={{fontSize:9,color:"#f87171",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"left",paddingLeft:8,fontWeight:700}}>PUT</span>
+                <span style={{fontSize:9,color:"#f8717188",letterSpacing:"0.08em",textTransform:"uppercase",textAlign:"left",paddingLeft:4}}>Delta</span>
               </div>
 
               {rows.map((row,idx)=>{
                 const isATM   = Math.abs(row.K-F)<0.5;
-                const isNear  = Math.abs(row.K-F)<1.5;
+                const isNear  = Math.abs(row.K-F)<2;
                 const callItm = row.K<F;
                 const putItm  = row.K>F;
-                const isEven  = idx%2===0;
                 return (
                   <div key={row.K} style={{
                     display:"grid",
-                    gridTemplateColumns:"1fr 3px 120px 90px 80px 3px 120px 90px 80px",
-                    gap:"0 0",
-                    padding:isATM?"10px 12px":"6px 12px",
-                    borderBottom:isATM?"none":"1px solid",
-                    borderBottomColor:isNear?"#182030":"#0d1117",
-                    borderTop:isATM?"2px solid #38bdf822":"none",
-                    borderBottomWidth:isATM?2:1,
-                    borderTopColor:isATM?"#38bdf822":"transparent",
-                    background:isATM?"rgba(56,189,248,0.07)":isEven?"transparent":"rgba(255,255,255,0.008)",
+                    gridTemplateColumns:"90px 90px 3px 130px 70px 3px 90px 90px",
+                    padding:isATM?"10px 12px":"5px 12px",
+                    borderBottom:"1px solid",
+                    borderBottomColor:isNear?"#141e2c":"#0b0d10",
+                    background:isATM?"rgba(56,189,248,0.08)":idx%2===0?"transparent":"rgba(255,255,255,0.007)",
+                    borderLeft:isATM?"3px solid #38bdf8":"3px solid transparent",
                     alignItems:"center",
+                    transition:"background 0.1s",
                   }}>
-                    {/* Strike + vol */}
-                    <div style={{display:"grid",gridTemplateColumns:"60px 60px",gap:0,alignItems:"center"}}>
-                      <span style={{
-                        fontSize:isATM?15:13,fontWeight:isATM?800:callItm||putItm?600:400,
-                        color:isATM?"#38bdf8":callItm?"#94a3b8":putItm?"#94a3b8":"#4a5d70",
-                        fontVariantNumeric:"tabular-nums",letterSpacing:"0.02em"
-                      }}>
-                        {isATM&&<span style={{fontSize:7,marginRight:3,color:"#38bdf8"}}>▶</span>}
-                        {row.K}
-                      </span>
-                      <span style={{fontSize:9,color:"#a78bfa77",textAlign:"center",fontVariantNumeric:"tabular-nums"}}>
-                        {(row.s*100).toFixed(1)}
-                      </span>
-                    </div>
-
-                    {/* Vertical divider */}
-                    <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"2px 8px"}}/>
-
-                    {/* Call */}
+                    {/* Call price */}
                     <div style={{textAlign:"right",paddingRight:8}}>
                       <span style={{
-                        fontSize:isATM?15:13,fontWeight:isATM?700:600,
-                        color:row.call<0.005?"#1e2d3d":callItm?"#34d399":isATM?"#7dd3fc":"#4a6070",
+                        fontSize:isATM?16:13,fontWeight:isATM?700:600,
+                        color:row.call<0.005?"#1a2535":callItm?"#34d399":isATM?"#7dd3fc":"#2d4a5e",
                         fontVariantNumeric:"tabular-nums"
                       }}>
                         {row.call<0.005?"—":row.call.toFixed(2)}
                       </span>
                     </div>
-                    <span style={{fontSize:isATM?11:10,color:callItm?"#34d39999":"#2d4055",textAlign:"right",fontVariantNumeric:"tabular-nums",paddingRight:4}}>
+                    {/* Call delta */}
+                    <span style={{fontSize:isATM?11:10,color:callItm?"#34d39988":"#1e3045",textAlign:"right",paddingRight:8,fontVariantNumeric:"tabular-nums"}}>
                       {row.cDelta.toFixed(2)}
                     </span>
-                    <span style={{fontSize:9,color:"#1e3050",textAlign:"right",paddingRight:8,fontVariantNumeric:"tabular-nums"}}>
-                      {row.vega.toFixed(2)}
-                    </span>
-
-                    {/* Vertical divider */}
-                    <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"2px 8px"}}/>
-
-                    {/* Put */}
-                    <div style={{textAlign:"right",paddingRight:8}}>
+                    {/* Left divider */}
+                    <div style={{width:1,background:isATM?"#38bdf833":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                    {/* Strike + vol CENTRE */}
+                    <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:10}}>
                       <span style={{
-                        fontSize:isATM?15:13,fontWeight:isATM?700:600,
-                        color:row.put<0.005?"#1e2d3d":putItm?"#f87171":isATM?"#fca5a5":"#4a6070",
+                        fontSize:isATM?17:14,fontWeight:isATM?800:500,
+                        color:isATM?"#38bdf8":"#4a5d70",
+                        fontVariantNumeric:"tabular-nums",letterSpacing:"0.01em"
+                      }}>
+                        {row.K}
+                      </span>
+                      <span style={{fontSize:9,color:"#a78bfa55",fontVariantNumeric:"tabular-nums"}}>
+                        {(row.s*100).toFixed(1)}
+                      </span>
+                    </div>
+                    {/* spacer col */}
+                    <span/>
+                    {/* Right divider */}
+                    <div style={{width:1,background:isATM?"#38bdf833":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
+                    {/* Put price */}
+                    <div style={{textAlign:"left",paddingLeft:8}}>
+                      <span style={{
+                        fontSize:isATM?16:13,fontWeight:isATM?700:600,
+                        color:row.put<0.005?"#1a2535":putItm?"#f87171":isATM?"#fca5a5":"#2d4a5e",
                         fontVariantNumeric:"tabular-nums"
                       }}>
                         {row.put<0.005?"—":row.put.toFixed(2)}
                       </span>
                     </div>
-                    <span style={{fontSize:isATM?11:10,color:putItm?"#f8717199":"#2d4055",textAlign:"right",fontVariantNumeric:"tabular-nums",paddingRight:4}}>
+                    {/* Put delta */}
+                    <span style={{fontSize:isATM?11:10,color:putItm?"#f8717188":"#1e3045",textAlign:"left",paddingLeft:4,fontVariantNumeric:"tabular-nums"}}>
                       {row.pDelta.toFixed(2)}
-                    </span>
-                    <span style={{fontSize:9,color:"#1e3050",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
-                      {row.vega.toFixed(2)}
                     </span>
                   </div>
                 );
@@ -1183,8 +1197,8 @@ export default function CCADesk() {
             </div>
           </div>
           <div style={{marginTop:12,display:"flex",justifyContent:"space-between",fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
-            <span>Read-only view - edit vol params in Options Chain tab</span>
-            <span>▶ = ATM  |  ITM calls green  |  ITM puts red</span>
+            <span>Read-only view — edit vol params in Options Chain tab</span>
+            <span>ITM calls green  |  ITM puts red  |  ATM highlighted</span>
           </div>
         </div>
       )}
