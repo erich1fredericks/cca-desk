@@ -230,6 +230,31 @@ const LCFS_OPT_EXPIRIES = LCFS_MONTHS.filter(c=>[2,5,8,11].includes(c.month)).sl
 // Strikes $50-$300 in $5 steps
 const LCFS_STRIKES = Array.from({length:51},(x,i)=>50+i*5);
 
+// ─── CCA Vintage Matrix Constants ────────────────────────────────────────────
+// All monthly contracts Apr-26 through Dec-28 (33 months) — computed once
+const CCA_MATRIX_EXPIRIES = (()=>{
+  const out=[]; let ey=2026,em=3;
+  while(true){
+    out.push({label:`${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][em].slice(0,3)}-${String(ey).slice(2)}`,
+      month:em,year:ey,isDecember:em===11,isQuarterly:[2,5,8,11].includes(em)});
+    em++; if(em>11){em=0;ey++;}
+    if(ey===2028&&em===11){
+      out.push({label:"Dec-28",month:11,year:2028,isDecember:true,isQuarterly:true});
+      break;
+    }
+  }
+  return out;
+})();
+const CCA_VINTAGES = [
+  {key:"v24",label:"CB4",vintage:2024,color:"#475569"},
+  {key:"v25",label:"CB5",vintage:2025,color:"#64748b"},
+  {key:"v26",label:"CB6",vintage:2026,color:"#38bdf8",isAnchor:true},
+  {key:"v27",label:"CB7",vintage:2027,color:"#34d399"},
+  {key:"v28",label:"CB8",vintage:2028,color:"#a78bfa"},
+];
+// Dec anchor year per vintage row (for isRowAnchor highlight)
+const CCA_ROW_DEC_YEAR = {v24:2026,v25:2026,v26:2026,v27:2027,v28:2028};
+
 // ─── West Power Constants ──────────────────────────────────────────────────────
 const WP_HUBS     = ["SP15","NP15","Mid-C","PV"];
 const WP_COLORS   = ["#38bdf8","#34d399","#fb923c","#a78bfa"];
@@ -1449,8 +1474,27 @@ function CCADesk({ fbData, syncStatus }) {
     return map;
   },[curve]);
 
-  // ── Spread calculator
-  const curveMap = useMemo(()=>{
+  // ── CCA Vintage Matrix ────────────────────────────────────────────────────
+  const vintageMatrix = useMemo(()=>{
+    const r = baseRate/100;
+    return CCA_VINTAGES.map(v=>{
+      const rowAnchorPx = v.isAnchor ? anchorPrice : anchorPrice + (vintageSpreads[v.key]||0);
+      return {
+        ...v,
+        anchorPx: rowAnchorPx,
+        cells: CCA_MATRIX_EXPIRIES.map(e=>{
+          // dt = months from Dec-26 to this expiry
+          const dtMonths = (e.year-2026)*12 + (e.month-11);
+          const px = rowAnchorPx * Math.exp(r * dtMonths/12);
+          return {
+            expiry:e,
+            price:px,
+            isRowAnchor: e.month===11 && e.year===CCA_ROW_DEC_YEAR[v.key],
+          };
+        }),
+      };
+    });
+  },[anchorPrice,baseRate,vintageSpreads]);
     const m={};
     curveWithMonthlyRates.forEach(c=>{ m[c.label]={price:c.price,month:c.month,year:c.year}; });
     return m;
@@ -2663,46 +2707,222 @@ function CCADesk({ fbData, syncStatus }) {
         </div>
       )}
       {/* ════════════ FUTURES CURVE TAB ════════════ */}
-      {tab===4 && (()=>{
-        // ── Vintage / contract definitions ──────────────────────────────────
-        // All quarterly expiry months: Mar=2, Jun=5, Sep=8, Dec=11
-        const Q_EXP_MONTHS = [2,5,8,11];
-        // All monthly contracts Apr-26 through Dec-28 (33 months)
-        const ALL_EXPIRIES = [];
-        let _ey=2026, _em=3; // Apr-26
-        while(!(_ey===2028 && _em===11+1)){
-          ALL_EXPIRIES.push({
-            label:`${MONTHS[_em].slice(0,3)}-${String(_ey).slice(2)}`,
-            month:_em, year:_ey,
-            isDecember: _em===11,
-            isQuarterly: [2,5,8,11].includes(_em),
-          });
-          _em++; if(_em>11){_em=0;_ey++;}
-          if(_ey===2028 && _em===12) break;
-        }
-        // Fix: ensure Dec-28 is included
-        if(!ALL_EXPIRIES.find(e=>e.label==="Dec-28"))
-          ALL_EXPIRIES.push({label:"Dec-28",month:11,year:2028,isDecember:true,isQuarterly:true});
+      {tab===4 && (
+        <div>
+          {/* ── Controls row ── */}
+          <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"stretch"}}>
+            {/* Anchor price */}
+            <div className="panel" style={{minWidth:170}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:7}}>
+                Dec-26 CB6 Anchor
+              </div>
+              <div style={{display:"flex",alignItems:"flex-end",gap:4}}>
+                <span style={{color:"#38bdf8",fontSize:17,lineHeight:1,marginBottom:1}}>$</span>
+                <input type="number" step="0.01" value={priceInput}
+                  onChange={e=>{setPriceInput(e.target.value);markEditing();}}
+                  onKeyDown={e=>{if(e.key==="Enter"){commitPrice(e.target.value);markEditing();e.target.blur();}}}
+                  style={{background:"transparent",border:"none",borderBottom:"2px solid #38bdf8",
+                    color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontSize:26,fontWeight:700,
+                    width:100,outline:"none",padding:"2px 0"}}/>
+              </div>
+              <div style={{fontSize:8,color:"#334155",marginTop:4}}>CB6 v26 · Press Enter</div>
+            </div>
+            {/* Base carry rate */}
+            <div className="panel" style={{minWidth:150}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:7}}>
+                Base Carry Rate
+              </div>
+              <div style={{display:"flex",alignItems:"flex-end",gap:4}}>
+                <input type="number" step="0.05" value={baseRate.toFixed(2)}
+                  onChange={e=>setBaseRateAndCascade(parseFloat(e.target.value)||0)}
+                  style={{background:"transparent",border:"none",borderBottom:"2px solid #64748b",
+                    color:"#64748b",fontFamily:"'IBM Plex Mono',monospace",fontSize:26,fontWeight:700,
+                    width:70,outline:"none",padding:"2px 0"}}/>
+                <span style={{color:"#64748b",fontSize:13,marginBottom:3}}>%/yr</span>
+              </div>
+              <div style={{fontSize:8,color:"#334155",marginTop:4}}>shared all vintages</div>
+            </div>
+            {/* Vintage spreads */}
+            <div className="panel" style={{flex:1,minWidth:400}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                Vintage Spreads vs Dec-26 CB6 ($/tonne)
+              </div>
+              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                {CCA_VINTAGES.filter(v=>!v.isAnchor).map(v=>(
+                  <div key={v.key}>
+                    <div style={{fontSize:8,color:v.color,marginBottom:4,fontWeight:600}}>
+                      {v.label}
+                      <span style={{color:"#334155",fontWeight:400,marginLeft:4}}>
+                        {v.key==="v24"||v.key==="v25"?"Dec-26":v.key==="v27"?"Dec-27":"Dec-28"}
+                      </span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:3}}>
+                      <button onClick={()=>setVintageSpread(v.key,parseFloat(((vintageSpreads[v.key]||0)-0.01).toFixed(3)))}
+                        style={{width:18,height:18,background:"#182030",border:"none",color:"#475569",
+                          cursor:"pointer",borderRadius:1,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                      <input type="number" step="0.01"
+                        value={(vintageSpreads[v.key]||0).toFixed(2)}
+                        onChange={e=>setVintageSpread(v.key,parseFloat(e.target.value)||0)}
+                        style={{width:64,background:"#070b10",border:`1px solid ${v.color}44`,
+                          color:v.color,fontFamily:"'IBM Plex Mono',monospace",fontSize:14,
+                          fontWeight:700,padding:"3px 5px",textAlign:"center",
+                          outline:"none",borderRadius:2}}/>
+                      <button onClick={()=>setVintageSpread(v.key,parseFloat(((vintageSpreads[v.key]||0)+0.01).toFixed(3)))}
+                        style={{width:18,height:18,background:"#182030",border:"none",color:"#475569",
+                          cursor:"pointer",borderRadius:1,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
 
-        // ── Vintage rows ─────────────────────────────────────────────────────
-        const VINTAGES = [
-          {key:"v24",label:"CB4",vintage:2024,symbol:"v24",color:"#475569",dimColor:"#334155"},
-          {key:"v25",label:"CB5",vintage:2025,symbol:"v25",color:"#64748b",dimColor:"#3d4f63"},
-          {key:"v26",label:"CB6",vintage:2026,symbol:"v26",color:"#38bdf8",dimColor:"#1e3a5f",isAnchor:true},
-          {key:"v27",label:"CB7",vintage:2027,symbol:"v27",color:"#34d399",dimColor:"#1a3d2e"},
-          {key:"v28",label:"CB8",vintage:2028,symbol:"v28",color:"#a78bfa",dimColor:"#2d1f5e"},
-        ];
+          {/* ── Vintage × Expiry matrix ── */}
+          <div style={{overflowX:"auto"}}>
+            <div style={{minWidth:"max-content"}}>
+              {/* Year group headers */}
+              <div style={{display:"flex",gap:1,marginBottom:0,paddingLeft:100}}>
+                {[2026,2027,2028].map(yr=>{
+                  const count=CCA_MATRIX_EXPIRIES.filter(e=>e.year===yr).length;
+                  return (
+                    <div key={yr} style={{
+                      width:count*62+(count-1),flexShrink:0,textAlign:"center",
+                      padding:"3px 4px",marginRight:1,
+                      background:yr===2026?"rgba(56,189,248,0.04)":yr===2027?"rgba(52,211,153,0.03)":"rgba(167,139,250,0.03)",
+                      borderBottom:"1px solid #182030",
+                      fontSize:9,fontWeight:700,letterSpacing:"0.1em",
+                      color:yr===2026?"#38bdf844":yr===2027?"#34d39944":"#a78bfa44",
+                    }}>{yr}</div>
+                  );
+                })}
+                <div style={{width:79,flexShrink:0}}/>
+              </div>
+              {/* Month column headers */}
+              <div style={{display:"flex",gap:1,marginBottom:1,paddingLeft:100}}>
+                {CCA_MATRIX_EXPIRIES.map(e=>{
+                  const expDate=new Date(e.year,e.month,15);
+                  const T=Math.max((expDate-new Date())/(365*24*3600*1000),0);
+                  return (
+                    <div key={e.label} style={{
+                      width:62,flexShrink:0,textAlign:"center",padding:"4px 2px",
+                      background:e.isDecember?"rgba(56,189,248,0.07)":e.isQuarterly?"rgba(56,189,248,0.03)":"#0b0f18",
+                      borderRadius:"2px 2px 0 0",
+                      borderBottom:`2px solid ${e.isDecember?"#38bdf866":e.isQuarterly?"#38bdf822":"#182030"}`,
+                    }}>
+                      <div style={{fontSize:9,fontWeight:e.isDecember?700:e.isQuarterly?600:400,
+                        color:e.isDecember?"#38bdf8":e.isQuarterly?"#38bdf888":"#334155",
+                        fontFamily:"'IBM Plex Mono',monospace"}}>
+                        {e.label.slice(0,3)}
+                      </div>
+                      <div style={{fontSize:6,color:"#1e2d3d",marginTop:1}}>{(T*365).toFixed(0)}d</div>
+                    </div>
+                  );
+                })}
+                <div style={{width:79,flexShrink:0,textAlign:"center",padding:"4px 2px",
+                  background:"#0b0f18",borderRadius:"2px 2px 0 0",borderBottom:"2px solid #182030"}}>
+                  <div style={{fontSize:8,color:"#334155"}}>vs CB6</div>
+                </div>
+              </div>
+              {/* Vintage rows */}
+              {vintageMatrix.map((v)=>(
+                <div key={v.key} style={{display:"flex",gap:1,marginBottom:1}}>
+                  {/* Row label */}
+                  <div style={{
+                    width:98,flexShrink:0,display:"flex",flexDirection:"column",
+                    justifyContent:"center",padding:"6px 8px",
+                    background:v.isAnchor?"rgba(56,189,248,0.06)":"#0b0f18",
+                    borderRadius:"2px 0 0 2px",
+                    borderLeft:`3px solid ${v.isAnchor?v.color:v.color+"44"}`,
+                  }}>
+                    <div style={{fontSize:13,fontWeight:700,color:v.color,fontFamily:"'IBM Plex Mono',monospace"}}>{v.label}</div>
+                    <div style={{fontSize:7,color:v.isAnchor?"#38bdf888":"#334155",marginTop:1}}>
+                      v{v.vintage}{v.isAnchor?" ■":""}
+                    </div>
+                  </div>
+                  {/* Price cells */}
+                  {v.cells.map((cell,ci)=>{
+                    const e=cell.expiry;
+                    const v26px=vintageMatrix.find(r=>r.key==="v26").cells[ci].price;
+                    const vsV26=!v.isAnchor?cell.price-v26px:null;
+                    return (
+                      <div key={e.label} style={{
+                        width:62,flexShrink:0,padding:"5px 2px",textAlign:"center",
+                        background:cell.isRowAnchor?`${v.color}14`:e.isDecember?"rgba(56,189,248,0.03)":"#0b0f18",
+                        border:cell.isRowAnchor?`1px solid ${v.color}55`:"1px solid transparent",
+                        borderRadius:cell.isRowAnchor?2:0,
+                        borderBottom:"1px solid #0a0e14",
+                      }}>
+                        <div style={{fontSize:cell.isRowAnchor?12:10,fontWeight:cell.isRowAnchor?700:400,
+                          color:cell.isRowAnchor?v.color:e.isDecember?"#94a3b8":e.isQuarterly?"#64748b":"#475569",
+                          fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                          {cell.price.toFixed(2)}
+                        </div>
+                        {vsV26!=null&&(
+                          <div style={{fontSize:6,color:vsV26>=0?"#34d39955":"#f8717155",
+                            marginTop:1,fontVariantNumeric:"tabular-nums"}}>
+                            {vsV26>=0?"+":""}{vsV26.toFixed(2)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* vs CB6 spread */}
+                  <div style={{width:79,flexShrink:0,padding:"5px 4px",textAlign:"center",
+                    background:"#0b0f18",borderBottom:"1px solid #0a0e14",
+                    display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                    {v.isAnchor?(
+                      <span style={{fontSize:8,color:"#38bdf8",fontWeight:700}}>anchor</span>
+                    ):(
+                      <>
+                        <div style={{fontSize:12,fontWeight:700,
+                          color:(vintageSpreads[v.key]||0)>=0?"#34d399":"#f87171",
+                          fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                          {(vintageSpreads[v.key]||0)>=0?"+":""}{(vintageSpreads[v.key]||0).toFixed(2)}
+                        </div>
+                        <div style={{fontSize:6,color:"#334155",marginTop:1}}>vs CB6</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
 
-        // ── Price computation ─────────────────────────────────────────────────
-        // All cells use Dec-26 as the carry anchor.
-        // Cell(vintage, expiry) = (Dec-26 CB6 + vintage spread) * exp(r * dt)
-        // where dt = months from Dec-26 to the expiry column
-        // Every cell is active — CCA is fungible across vintages
+          {/* ── December anchor summary ── */}
+          <div style={{marginTop:14,padding:"10px 12px",background:"#0b0f18",border:"1px solid #182030",borderRadius:3}}>
+            <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:8}}>
+              December Anchor Summary
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+              {vintageMatrix.map(v=>{
+                const spread=v.isAnchor?0:(vintageSpreads[v.key]||0);
+                return (
+                  <div key={v.key} style={{background:"#070b10",border:`1px solid ${v.color}33`,borderRadius:3,padding:"8px 12px",minWidth:120}}>
+                    <div style={{fontSize:8,color:v.color,fontWeight:700,marginBottom:4}}>{v.label} {v.isAnchor?"(anchor)":""}</div>
+                    <div style={{fontSize:18,fontWeight:700,color:v.isAnchor?"#38bdf8":"#d0dcea",
+                      fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                      ${v.anchorPx.toFixed(2)}
+                    </div>
+                    <div style={{fontSize:8,color:"#334155",marginTop:3}}>
+                      Dec-{CCA_ROW_DEC_YEAR[v.key].toString().slice(2)}
+                      {!v.isAnchor&&<span style={{color:spread>=0?"#34d399":"#f87171",marginLeft:4,fontWeight:600}}>
+                        {spread>=0?"+":""}{spread.toFixed(2)}
+                      </span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
-        function rowAnchorPrice(vkey) {
-          if(vkey==="v26") return anchorPrice;
-          return anchorPrice + (vintageSpreads[vkey]||0);
-        }
+          <div style={{marginTop:10,borderTop:"1px solid #182030",paddingTop:8,
+            display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,
+            fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
+            <span>CCA vintage matrix · Dec-26 CB6 anchor · carry = base rate from Dec-26 · vintage spreads applied to Dec anchor then carried</span>
+            <span>◆ Dec cols · quarterly cols medium · monthly cols dim · ■ = row anchor cell</span>
+          </div>
+        </div>
+      )}
 
         // Dec-26 is the universal carry anchor for all cells
         const ANCHOR_YEAR = 2026;
