@@ -1,15 +1,58 @@
 {
   "name": "cca-desk",
   "version": "1.0.0",
+  "description": "CCA Derivatives Desk - California Carbon Allowances pricing tool",
+  "author": "CCA Desk",
   "private": true,
+  "main": "electron.js",
+  "homepage": "./",
   "dependencies": {
+    "firebase": "^10.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1"
   },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "concurrently": "^8.0.0",
+    "wait-on": "^7.0.0"
+  },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build"
+    "build": "react-scripts build",
+    "electron-dev": "concurrently \"npm start\" \"wait-on http://localhost:3000 && electron .\"",
+    "build-app": "npm run build && electron-builder"
+  },
+  "build": {
+    "appId": "com.ccadesk.app",
+    "productName": "CCA Desk",
+    "directories": {
+      "output": "dist"
+    },
+    "extraResources": [],
+    "files": [
+      "build/**/*",
+      "electron.js",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CCA Desk"
+    }
   },
   "browserslist": {
     "production": [">0.2%", "not dead", "not op_mini all"],
