@@ -3277,143 +3277,154 @@ export default function CCADesk() {
           </div>
         );
       })()}
-
-            {/* ════════════ ACP PRICER TAB ════════════ */}
+      {/* ════════════ ACP PRICER TAB ════════════ */}
       {tab===7 && (()=>{
         const today = new Date();
 
-        function floorForYear(year) {
-          return acpFloorBase * Math.pow(1 + acpFloorGrowth/100, year - 2026);
+        // ── Floor price for each year ────────────────────────────────────────
+        function floorForYear(yr) {
+          return acpFloorBase * Math.pow(1 + acpFloorGrowth/100, yr - 2026);
         }
 
-        // ── Bachelier ACP index pricer ─────────────────────────────────────────
-        // ACP Index = E[max(basis, K_floor − F_CCA)]
-        // Bachelier call on basis struck at floorBasis = K_floor − F_CCA
-        function acpIndex(basisMid, floorBasis, T, basisVol) {
-          if(T<=0||basisVol<=0) return Math.max(basisMid, floorBasis);
-          const sT = basisVol * Math.sqrt(T);
-          const d  = (basisMid - floorBasis) / sT;
-          return (basisMid - floorBasis)*normCDF(d) + sT*normPDF(d) + floorBasis;
-        }
-        function acpPFloor(basisMid, floorBasis, T, basisVol) {
-          if(T<=0||basisVol<=0) return basisMid<=floorBasis?1:0;
-          const d = (basisMid - floorBasis) / (basisVol*Math.sqrt(T));
-          return normCDF(-d);
-        }
-        // Delta: d(ACP)/d(F_CCA) — CCA moves floor basis by -1 per +1 CCA
-        // so d(ACP)/d(F) = -d(ACP)/d(floorBasis) = -N(-d) (negative: rising CCA reduces floor opt)
-        function acpDeltaCCA(basisMid, floorBasis, T, basisVol) {
-          if(T<=0||basisVol<=0) return floorBasis>=basisMid?1:0;
-          const d = (basisMid - floorBasis) / (basisVol*Math.sqrt(T));
-          return -normCDF(-d); // per $1 rise in CCA
-        }
-        // Vega: d(ACP)/d(basisVol)
-        function acpVega(basisMid, floorBasis, T, basisVol) {
-          if(T<=0||basisVol<=0) return 0;
-          const sT = basisVol*Math.sqrt(T);
-          const d = (basisMid - floorBasis) / sT;
-          return Math.sqrt(T) * normPDF(d);
-        }
+        // ── Core model: ACP buyer is SHORT a put on CCA at the floor ─────────
+        // Buyer receives ACP index price P (small premium near zero)
+        // At expiry: forced to buy CCA at max(auction_clear, floor)
+        // P&L = CCA_secondary - max(CCA_secondary, floor)
+        //      = -max(0, floor - CCA) = SHORT PUT payoff
+        //
+        // ACP index fair value = Put(F_CCA, K_floor, T, σ_CCA)
+        // This is the fair premium the buyer should RECEIVE for selling the put.
+        // Buyer wants index > put value (collecting more than fair premium)
+        // Seller wants index < put value (paying less than fair premium)
+        //
+        // Worst case for buyer: CCA crashes well below floor.
+        // They receive CCA at floor price ($27.94) into a market at e.g. $10 = -$17.94 loss
 
-        // ── Selected contract ─────────────────────────────────────────────────
-        const selAcp = ACP_CONTRACTS.find(a=>a.label===acpSelContract)||ACP_CONTRACTS[0];
-        const selCcaData = expiryPriceMap[selAcp.deliveredCCA];
-        const selF = selCcaData?.price ?? anchorPrice;
-        const selK = floorForYear(selAcp.year);
-        const selFloorBasis = selK - selF;
-        const auctionDate = new Date(selAcp.year, selAcp.month, 15);
-        const selT = Math.max((auctionDate - today)/(365*24*3600*1000), 0.003);
-        const selBasisMid  = acpGetParam(selAcp.label,'basisMid', 0);
-        const selBasisVol  = acpGetParam(selAcp.label,'basisVol', 0.50);
-        const selMktBid    = acpGetParam(selAcp.label,'mktBid', null);
-        const selMktAsk    = acpGetParam(selAcp.label,'mktAsk', null);
-        const selIndexFair = acpIndex(selBasisMid, selFloorBasis, selT, selBasisVol);
-        const selPFloor    = acpPFloor(selBasisMid, selFloorBasis, selT, selBasisVol);
-        const selDelta     = acpDeltaCCA(selBasisMid, selFloorBasis, selT, selBasisVol);
-        const selVega      = acpVega(selBasisMid, selFloorBasis, selT, selBasisVol);
-        const selFloorOpt  = selIndexFair - selBasisMid;
-
-        // ── Scenario grid: CCA rows x BasisVol cols ───────────────────────────
-        // CCA range: ±$4 from current in $0.50 steps = 17 rows
-        const cca_steps = [];
-        for(let dF=-4; dF<=4; dF+=0.5) cca_steps.push(parseFloat((selF+dF).toFixed(2)));
-        // BasisVol cols: 0.10 to 2.00 in 0.20 steps = 10 cols
-        const vol_steps = [0.10,0.25,0.50,0.75,1.00,1.25,1.50,1.75,2.00];
-
-        // Color scale for index value: centered on fair value
-        function indexColor(val) {
-          const range = 1.5;
-          const t = Math.max(-1, Math.min(1, (val - selBasisMid) / range));
-          if(t > 0) {
-            const g = Math.round(52 + t*159);
-            return `rgb(30,${g},80)`;
-          } else {
-            const r = Math.round(180 - t*75);
-            return `rgb(${r},30,50)`;
+        function acpPutFair(F, K, T, sigma) {
+          return bsPut(F, K, T, r, sigma);
+        }
+        function acpPutDelta(F, K, T, sigma) {
+          // Short put delta = +N(-d2) — positive, buyer profits if CCA rises
+          if(T<=0||sigma<=0) return F>K?0:1;
+          const d1=(Math.log(F/K)+0.5*sigma*sigma*T)/(sigma*Math.sqrt(T));
+          const d2=d1-sigma*Math.sqrt(T);
+          return normCDF(-d2); // put delta magnitude (buyer is short so delta = +N(-d2))
+        }
+        function acpPutVega(F, K, T, sigma) {
+          return bsVega(F, K, T, r, sigma); // vega of the put
+        }
+        function acpPFloor(F, K, T, sigma) {
+          // Prob CCA < floor at expiry = N(-d2)
+          if(T<=0||sigma<=0) return F<K?1:0;
+          const d1=(Math.log(F/K)+0.5*sigma*sigma*T)/(sigma*Math.sqrt(T));
+          const d2=d1-sigma*Math.sqrt(T);
+          return normCDF(-d2);
+        }
+        // Implied CCA vol from market ACP index price (Newton-Raphson)
+        function impliedVol(mktPrice, F, K, T) {
+          if(mktPrice<=0) return 0;
+          let s=0.35;
+          for(let i=0;i<60;i++){
+            const p=bsPut(F,K,T,r,s);
+            const v=bsVega(F,K,T,r,s);
+            if(Math.abs(v)<1e-10) break;
+            const ds=(mktPrice-p)/v;
+            s=Math.max(0.001,Math.min(5,s+ds));
+            if(Math.abs(ds)<1e-7) break;
           }
+          return s;
         }
+
+        // ── Selected contract ──────────────────────────────────────────────────
+        const selAcp    = ACP_CONTRACTS.find(a=>a.label===acpSelContract)||ACP_CONTRACTS[0];
+        const ccaFwdData= expiryPriceMap[selAcp.deliveredCCA];
+        const selF      = ccaFwdData?.price ?? anchorPrice;
+        const selK      = floorForYear(selAcp.year);
+        const selADate  = new Date(selAcp.year, selAcp.month, 15);
+        const selT      = Math.max((selADate - today)/(365*24*3600*1000), 0.003);
+        // CCA vol at the floor strike from vol surface
+        const selSigma  = strikeVol(selK, selF, atmVol, skew, convexity, perStrikeAdj[Math.round(selK)]||0);
+        // Model put fair value
+        const selPutFair= acpPutFair(selF, selK, selT, selSigma);
+        const selDelta  = acpPutDelta(selF, selK, selT, selSigma);
+        const selVegaV  = acpPutVega(selF, selK, selT, selSigma);
+        const selPFloor = acpPFloor(selF, selK, selT, selSigma);
+        // Market bid/ask
+        const selMktBid = acpGetParam(selAcp.label,'mktBid', null);
+        const selMktAsk = acpGetParam(selAcp.label,'mktAsk', null);
+        const selMktMid = selMktBid!=null&&selMktAsk!=null ? (selMktBid+selMktAsk)/2 : null;
+        // Implied vol from market mid
+        const selImpVol = selMktMid!=null ? impliedVol(selMktMid, selF, selK, selT) : null;
+        // Rich/cheap: if market mid > put fair, buyer is collecting MORE than fair = good for buyer
+        const selRC     = selMktMid!=null ? selMktMid - selPutFair : null;
+
+        // ── Scenario grids ─────────────────────────────────────────────────────
+        // CCA rows: from $15 to $35 in $1 steps (covers well below and above floor)
+        const ccaRows = [];
+        for(let p=15; p<=35; p++) ccaRows.push(p);
+        // Vol cols: 10% to 80% in 10% steps
+        const volCols = [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.70,0.80];
 
         return (
           <div>
-            {/* ── Contract selector + floor controls ── */}
+            {/* ── Contract selector ── */}
             <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"stretch"}}>
 
-              {/* Contract picker */}
-              <div className="panel" style={{minWidth:260}}>
+              {/* Picker + floor */}
+              <div className="panel" style={{minWidth:280}}>
                 <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
-                  ACP Contract
+                  ACP Contract — Buyer is Short Put on CCA
                 </div>
-                <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:12}}>
                   {ACP_CONTRACTS.map(a=>{
                     const isSel=a.label===acpSelContract;
-                    const ccaD=expiryPriceMap[a.deliveredCCA];
-                    const fF=ccaD?.price??anchorPrice;
-                    const fK=floorForYear(a.year);
+                    const cD=expiryPriceMap[a.deliveredCCA];
+                    const F=cD?.price??anchorPrice;
+                    const K=floorForYear(a.year);
+                    const moneyness=((F/K-1)*100).toFixed(1);
                     return (
                       <button key={a.label} onClick={()=>setAcpSelContract(a.label)} style={{
                         padding:"4px 9px",fontFamily:"'IBM Plex Mono',monospace",fontSize:9,
                         fontWeight:isSel?700:400,borderRadius:2,cursor:"pointer",border:"1px solid",
                         borderColor:isSel?"#38bdf8":"#182030",
                         background:isSel?"rgba(56,189,248,0.10)":"transparent",
-                        color:isSel?"#38bdf8":"#475569",transition:"all 0.12s",
+                        color:isSel?"#38bdf8":"#475569",
                       }}>
                         <div>{a.label}</div>
                         <div style={{fontSize:7,color:isSel?"#7dd3fc":"#334155",marginTop:1}}>
-                          {(fK-fF).toFixed(2)}
+                          {F>K?`+${moneyness}%`:`${moneyness}%`} OTM
                         </div>
                       </button>
                     );
                   })}
                 </div>
-                {/* Floor controls */}
-                <div style={{display:"flex",gap:8,alignItems:"center",borderTop:"1px solid #182030",paddingTop:8}}>
+                <div style={{borderTop:"1px solid #182030",paddingTop:10,display:"flex",gap:10}}>
                   <div>
-                    <div style={{fontSize:7,color:"#334155",marginBottom:2}}>2026 Reserve Price</div>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:3}}>2026 Reserve Price</div>
                     <div style={{display:"flex",alignItems:"center",gap:2}}>
                       <span style={{fontSize:9,color:"#34d399"}}>$</span>
                       <input type="number" step="0.01" value={acpFloorBase.toFixed(2)}
                         onChange={e=>setAcpFloorBase(parseFloat(e.target.value)||27.94)}
                         style={{background:"#070b10",border:"1px solid #34d39944",color:"#34d399",
-                          fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:700,
-                          width:70,outline:"none",borderRadius:2,padding:"2px 4px"}}/>
+                          fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:700,
+                          width:72,outline:"none",borderRadius:2,padding:"3px 5px"}}/>
                     </div>
                   </div>
                   <div>
-                    <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Growth/yr</div>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Growth/yr</div>
                     <div style={{display:"flex",alignItems:"center",gap:2}}>
                       <input type="number" step="0.1" value={acpFloorGrowth.toFixed(1)}
                         onChange={e=>setAcpFloorGrowth(parseFloat(e.target.value)||7.5)}
                         style={{background:"#070b10",border:"1px solid #a78bfa44",color:"#a78bfa",
-                          fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:700,
-                          width:52,outline:"none",borderRadius:2,padding:"2px 4px"}}/>
+                          fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:700,
+                          width:52,outline:"none",borderRadius:2,padding:"3px 5px"}}/>
                       <span style={{fontSize:9,color:"#a78bfa"}}>%</span>
                     </div>
                   </div>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:7,color:"#334155",marginBottom:4}}>Floor schedule</div>
+                  <div>
                     {[2026,2027,2028].map(y=>(
-                      <div key={y} style={{display:"flex",justifyContent:"space-between",fontSize:8,marginBottom:1}}>
-                        <span style={{color:"#334155"}}>{y}</span>
+                      <div key={y} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:8,marginBottom:2}}>
+                        <span style={{color:"#334155"}}>{y} floor</span>
                         <span style={{color:"#34d399",fontFamily:"'IBM Plex Mono',monospace",fontWeight:600}}>${floorForYear(y).toFixed(2)}</span>
                       </div>
                     ))}
@@ -3421,286 +3432,344 @@ export default function CCADesk() {
                 </div>
               </div>
 
-              {/* Live params for selected contract */}
-              <div className="panel" style={{minWidth:240}}>
+              {/* Selected contract key metrics */}
+              <div className="panel" style={{minWidth:230}}>
                 <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
-                  {selAcp.label} — Live Inputs
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                  <div>
-                    <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Basis Mid ($/t)</div>
-                    <input type="number" step="0.01" value={selBasisMid.toFixed(2)}
-                      onChange={e=>acpSetParam(selAcp.label,'basisMid',parseFloat(e.target.value)||0)}
-                      style={{background:"#070b10",border:"1px solid #38bdf844",color:"#38bdf8",
-                        fontFamily:"'IBM Plex Mono',monospace",fontSize:16,fontWeight:700,
-                        width:"100%",outline:"none",borderRadius:2,padding:"4px 6px"}}/>
-                    <div style={{fontSize:7,color:"#334155",marginTop:2}}>auction vs secondary</div>
-                  </div>
-                  <div>
-                    <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Basis Vol ($/t)</div>
-                    <input type="number" step="0.05" min="0.01" value={selBasisVol.toFixed(2)}
-                      onChange={e=>acpSetParam(selAcp.label,'basisVol',Math.max(0.01,parseFloat(e.target.value)||0.5))}
-                      style={{background:"#070b10",border:"1px solid #a78bfa44",color:"#a78bfa",
-                        fontFamily:"'IBM Plex Mono',monospace",fontSize:16,fontWeight:700,
-                        width:"100%",outline:"none",borderRadius:2,padding:"4px 6px"}}/>
-                    <div style={{fontSize:7,color:"#334155",marginTop:2}}>1σ of auction basis</div>
-                  </div>
-                  <div>
-                    <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Market Bid</div>
-                    <input type="number" step="0.01"
-                      value={selMktBid!=null?selMktBid:""}
-                      placeholder="—"
-                      onChange={e=>{const v=parseFloat(e.target.value);acpSetParam(selAcp.label,'mktBid',isNaN(v)?null:v);}}
-                      style={{background:"#070b10",border:"1px solid #34d39933",color:"#34d399",
-                        fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:600,
-                        width:"100%",outline:"none",borderRadius:2,padding:"3px 5px"}}/>
-                  </div>
-                  <div>
-                    <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Market Ask</div>
-                    <input type="number" step="0.01"
-                      value={selMktAsk!=null?selMktAsk:""}
-                      placeholder="—"
-                      onChange={e=>{const v=parseFloat(e.target.value);acpSetParam(selAcp.label,'mktAsk',isNaN(v)?null:v);}}
-                      style={{background:"#070b10",border:"1px solid #f8717133",color:"#f87171",
-                        fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:600,
-                        width:"100%",outline:"none",borderRadius:2,padding:"3px 5px"}}/>
-                  </div>
-                </div>
-              </div>
-
-              {/* Key outputs */}
-              <div className="panel" style={{minWidth:260}}>
-                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
-                  {selAcp.label} — Index Fair Value
+                  {selAcp.label} — Short Put Metrics
                 </div>
                 <div style={{marginBottom:12}}>
-                  <div style={{fontSize:8,color:"#334155",marginBottom:4}}>ACP Index Fair</div>
-                  <div style={{fontSize:28,fontWeight:700,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",
-                    fontVariantNumeric:"tabular-nums",letterSpacing:"-0.02em"}}>
-                    {selIndexFair>=0?"+":""}{selIndexFair.toFixed(3)}
+                  <div style={{fontSize:8,color:"#334155",marginBottom:4}}>Put Fair Value (index)</div>
+                  <div style={{fontSize:30,fontWeight:700,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",
+                    letterSpacing:"-0.02em",fontVariantNumeric:"tabular-nums"}}>
+                    {selPutFair.toFixed(4)}
                   </div>
-                  {selMktBid!=null&&selMktAsk!=null&&(
-                    <div style={{fontSize:10,color:"#475569",marginTop:3}}>
-                      Mkt: <span style={{color:"#34d399"}}>{selMktBid>=0?"+":""}{selMktBid.toFixed(2)}</span>
-                      <span style={{color:"#334155",margin:"0 4px"}}>/</span>
-                      <span style={{color:"#f87171"}}>{selMktAsk>=0?"+":""}{selMktAsk.toFixed(2)}</span>
-                      &nbsp;·&nbsp;
-                      <span style={{color:((selMktBid+selMktAsk)/2)>selIndexFair?"#f87171":"#34d399"}}>
-                        {((selMktBid+selMktAsk)/2)>selIndexFair?"RICH ":"CHEAP "}
-                        {Math.abs(((selMktBid+selMktAsk)/2)-selIndexFair).toFixed(3)}
-                      </span>
-                    </div>
-                  )}
+                  <div style={{fontSize:8,color:"#334155",marginTop:2}}>
+                    fair premium for buyer being short the put
+                  </div>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
                   {[
-                    {label:"Floor Basis",val:`${selFloorBasis.toFixed(3)}`,sub:`K−F = ${selK.toFixed(2)}−${selF.toFixed(2)}`,color:selFloorBasis<-2?"#334155":selFloorBasis<-0.5?"#fb923c":"#f87171"},
-                    {label:"Floor Opt",val:`+${selFloorOpt.toFixed(3)}`,sub:"premium vs mid",color:"#fb923c"},
-                    {label:"P(floor hit)",val:`${(selPFloor*100).toFixed(1)}%`,sub:"P(auction fails)",color:selPFloor>0.15?"#f87171":selPFloor>0.05?"#fb923c":"#34d399"},
-                    {label:"Δ CCA",val:`${selDelta.toFixed(3)}`,sub:"$/t per $1 CCA",color:"#a78bfa"},
-                    {label:"Vega",val:`${selVega.toFixed(3)}`,sub:"$/t per $1 vol",color:"#a78bfa"},
-                    {label:"T (days)",val:`${(selT*365).toFixed(0)}d`,sub:selAcp.deliveredCCA,color:"#64748b"},
-                  ].map(({label,val,sub,color})=>(
+                    {label:"CCA Fwd",val:`$${selF.toFixed(2)}`,color:"#d0dcea"},
+                    {label:"Floor Strike",val:`$${selK.toFixed(2)}`,color:"#34d399"},
+                    {label:"Moneyness",val:`${selF>selK?"+":""}${((selF/selK-1)*100).toFixed(1)}%`,
+                     color:selF>selK?"#34d399":"#f87171"},
+                    {label:"CCA Vol @ K",val:`${(selSigma*100).toFixed(1)}%`,color:"#fb923c"},
+                    {label:"Short Put Δ",val:`+${selDelta.toFixed(3)}`,color:"#a78bfa"},
+                    {label:"Vega",val:selVegaV.toFixed(3),color:"#a78bfa"},
+                    {label:"P(ITM / loss)",val:`${(selPFloor*100).toFixed(1)}%`,
+                     color:selPFloor>0.15?"#f87171":selPFloor>0.05?"#fb923c":"#34d399"},
+                    {label:"T",val:`${(selT*365).toFixed(0)}d`,color:"#64748b"},
+                  ].map(({label,val,color})=>(
                     <div key={label} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"5px 7px"}}>
-                      <div style={{fontSize:7,color:"#334155",marginBottom:2}}>{label}</div>
-                      <div style={{fontSize:12,fontWeight:700,color,fontFamily:"'IBM Plex Mono',monospace"}}>{val}</div>
-                      <div style={{fontSize:7,color:"#1e2d3d",marginTop:1}}>{sub}</div>
+                      <div style={{fontSize:7,color:"#334155",marginBottom:1}}>{label}</div>
+                      <div style={{fontSize:11,fontWeight:700,color,fontFamily:"'IBM Plex Mono',monospace"}}>{val}</div>
                     </div>
                   ))}
                 </div>
               </div>
+
+              {/* Market bid/ask + implied vol */}
+              <div className="panel" style={{flex:1,minWidth:220}}>
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                  Market vs Model
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:7,color:"#34d399",marginBottom:3}}>Market Bid</div>
+                    <input type="number" step="0.01"
+                      value={selMktBid!=null?selMktBid:""}
+                      placeholder="e.g. -0.10"
+                      onChange={e=>{const v=parseFloat(e.target.value);acpSetParam(selAcp.label,'mktBid',isNaN(v)?null:v);}}
+                      style={{width:"100%",background:"#070b10",border:"1px solid #34d39944",color:"#34d399",
+                        fontFamily:"'IBM Plex Mono',monospace",fontSize:15,fontWeight:700,
+                        outline:"none",borderRadius:2,padding:"4px 6px"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:7,color:"#f87171",marginBottom:3}}>Market Ask</div>
+                    <input type="number" step="0.01"
+                      value={selMktAsk!=null?selMktAsk:""}
+                      placeholder="e.g. +0.05"
+                      onChange={e=>{const v=parseFloat(e.target.value);acpSetParam(selAcp.label,'mktAsk',isNaN(v)?null:v);}}
+                      style={{width:"100%",background:"#070b10",border:"1px solid #f8717133",color:"#f87171",
+                        fontFamily:"'IBM Plex Mono',monospace",fontSize:15,fontWeight:700,
+                        outline:"none",borderRadius:2,padding:"4px 6px"}}/>
+                  </div>
+                </div>
+
+                {selMktMid!=null&&(
+                  <div style={{background:"#070b10",border:"1px solid #182030",borderRadius:3,padding:"10px 12px",marginBottom:10}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+                      <span style={{fontSize:8,color:"#334155",letterSpacing:"0.08em"}}>MKT MID</span>
+                      <span style={{fontSize:16,fontWeight:700,color:"#d0dcea",fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                        {selMktMid>=0?"+":""}{selMktMid.toFixed(4)}
+                      </span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+                      <span style={{fontSize:8,color:"#334155",letterSpacing:"0.08em"}}>MODEL FAIR</span>
+                      <span style={{fontSize:16,fontWeight:700,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                        {selPutFair.toFixed(4)}
+                      </span>
+                    </div>
+                    <div style={{borderTop:"1px solid #182030",paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                      <span style={{fontSize:8,color:"#334155",letterSpacing:"0.08em"}}>RICH/CHEAP</span>
+                      <span style={{fontSize:18,fontWeight:700,
+                        color:selRC>0?"#34d399":"#f87171",
+                        fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                        {selRC>=0?"+":""}{selRC.toFixed(4)}
+                      </span>
+                    </div>
+                    <div style={{fontSize:8,color:"#475569",marginTop:6,lineHeight:1.5}}>
+                      {selRC>0
+                        ? <span><span style={{color:"#34d399"}}>Buyer collecting more than model fair.</span> Market is paying the ACP buyer MORE than the put is theoretically worth — favourable for the buyer (short put). They are being compensated above fair value for taking on floor risk.</span>
+                        : <span><span style={{color:"#f87171"}}>Buyer collecting less than model fair.</span> Market is paying the ACP buyer LESS than the put is worth — unfavourable. Buyer is not being adequately compensated for the downside risk they are taking on.</span>
+                      }
+                    </div>
+                  </div>
+                )}
+
+                {/* Implied vol from market */}
+                {selImpVol!=null&&selImpVol>0&&(
+                  <div style={{background:"#070b10",border:"1px solid #a78bfa33",borderRadius:3,padding:"8px 12px"}}>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:4}}>IMPLIED CCA VOL FROM MKT MID</div>
+                    <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                      <span style={{fontSize:22,fontWeight:700,color:"#a78bfa",fontFamily:"'IBM Plex Mono',monospace"}}>
+                        {(selImpVol*100).toFixed(1)}%
+                      </span>
+                      <span style={{fontSize:10,color:"#334155"}}>vs surface {(selSigma*100).toFixed(1)}%</span>
+                    </div>
+                    <div style={{fontSize:8,color:"#475569",marginTop:4,lineHeight:1.5}}>
+                      {selImpVol<selSigma
+                        ? <span style={{color:"#34d399"}}>Market implies lower CCA vol than surface — ACP buyers are pricing floor risk as less likely than your vol surface suggests.</span>
+                        : <span style={{color:"#fb923c"}}>Market implies higher CCA vol than surface — ACP buyers are pricing more floor risk than your vol surface suggests.</span>
+                      }
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* ── Seller Perspective: BS Put on CCA at floor + implied vol ── */}
-            {(()=>{
-              // Seller view: ACP fair = CCA fwd + Put(F, K_floor, T, σ_CCA)
-              // The put premium is what the seller implicitly gives away
-              // Use CCA vol surface at floor strike
-              const sellerCcaVol = strikeVol(selK, selF, atmVol, skew, convexity, perStrikeAdj[Math.round(selK)]||0);
-              const sellerPutVal = bsPut(selF, selK, selT, r, sellerCcaVol);
-              // ACP fair from seller view: basis mid + floor put premium
-              const sellerAcpFair = selBasisMid + sellerPutVal;
-              // Put delta = -N(-d2), prob CCA < floor
-              const sd1 = selT>0&&sellerCcaVol>0 ? (Math.log(selF/selK)+0.5*sellerCcaVol*sellerCcaVol*selT)/(sellerCcaVol*Math.sqrt(selT)) : 0;
-              const sd2 = sd1 - sellerCcaVol*Math.sqrt(selT);
-              const sellerPFloor = normCDF(-sd2);
-              const sellerDelta  = -normCDF(-sd2); // put delta on CCA
-              // Implied CCA vol from buyer's Bachelier price
-              // solve: bsPut(F, K, T, r, σ) = selFloorOpt
-              // Newton-Raphson
-              function impliedCcaVol(targetPutVal, F, K, T, rr) {
-                if(targetPutVal<=0) return 0;
-                let s = 0.35;
-                for(let i=0;i<50;i++){
-                  const p = bsPut(F,K,T,rr,s);
-                  const v = bsVega(F,K,T,rr,s);
-                  if(Math.abs(v)<1e-10) break;
-                  const ds = (targetPutVal-p)/v;
-                  s = Math.max(0.001, s+ds);
-                  if(Math.abs(ds)<1e-6) break;
-                }
-                return s;
-              }
-              const impliedVol = impliedCcaVol(selFloorOpt, selF, selK, selT, r);
-              // Divergence between models
-              const modelDivergence = sellerAcpFair - selIndexFair;
-              // CCA vol scenario: put value across CCA vol range (10% to 80%)
-              const ccaVolSteps = [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.70,0.80];
+            {/* ── Scenario matrix: put value grid ── */}
+            <div className="panel" style={{marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+                <div>
+                  <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase"}}>
+                    Put Value Scenario Matrix — {selAcp.label}
+                  </div>
+                  <div style={{fontSize:8,color:"#334155",marginTop:2}}>
+                    Rows: CCA price $15–$35 &nbsp;·&nbsp; Cols: CCA vol % &nbsp;·&nbsp; Values: put fair value (ACP index fair) &nbsp;·&nbsp;
+                    <span style={{color:"#38bdf8"}}>■</span> current &nbsp;
+                    {selMktMid!=null&&<><span style={{color:"#34d399"}}>■</span> market mid</>}
+                  </div>
+                </div>
+                <div style={{textAlign:"right",fontSize:8,color:"#334155"}}>
+                  Floor: <span style={{color:"#34d399",fontWeight:700}}>${selK.toFixed(2)}</span>
+                  &nbsp;· Worst case loss at $15 CCA: <span style={{color:"#f87171",fontWeight:700}}>${(selK-15).toFixed(2)}/t</span>
+                </div>
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <div style={{minWidth:"max-content"}}>
+                  {/* Header */}
+                  <div style={{display:"flex",gap:1,marginBottom:1}}>
+                    <div style={{width:72,flexShrink:0}}/>
+                    {volCols.map(v=>{
+                      const isCurVol=Math.abs(v-selSigma)<0.025;
+                      return (
+                        <div key={v} style={{width:56,flexShrink:0,fontSize:7,fontWeight:isCurVol?700:400,
+                          color:isCurVol?"#fb923c":"#475569",
+                          padding:"3px 0",textAlign:"center",background:"#0b0f18",borderRadius:"2px 2px 0 0"}}>
+                          {(v*100).toFixed(0)}%
+                        </div>
+                      );
+                    })}
+                    <div style={{width:52,flexShrink:0,fontSize:7,color:"#334155",padding:"3px 0",textAlign:"center"}}>P(ITM)</div>
+                    <div style={{width:52,flexShrink:0,fontSize:7,color:"#334155",padding:"3px 0",textAlign:"center"}}>Max loss</div>
+                  </div>
 
-              return (
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+                  {/* Rows */}
+                  {ccaRows.map(cca=>{
+                    const isFloor    = Math.abs(cca-selK)<0.5;
+                    const isCurRow   = Math.abs(cca-selF)<0.5;
+                    const belowFloor = cca < selK;
+                    const intrinsic  = Math.max(0, selK-cca); // put intrinsic at this CCA
+                    const pITM       = acpPFloor(cca, selK, selT, selSigma);
+                    return (
+                      <div key={cca} style={{display:"flex",gap:1,marginBottom:1}}>
+                        {/* CCA label */}
+                        <div style={{
+                          width:72,flexShrink:0,padding:"4px 6px",textAlign:"right",
+                          background:isCurRow?"rgba(56,189,248,0.12)":isFloor?"rgba(52,211,153,0.08)":belowFloor?"rgba(248,113,113,0.06)":"#0b0f18",
+                          borderRadius:"2px 0 0 2px",
+                          borderLeft:isCurRow?"2px solid #38bdf8":isFloor?"2px solid #34d399":belowFloor?"2px solid #f8717133":"2px solid transparent",
+                        }}>
+                          <div style={{fontSize:11,fontWeight:isCurRow||isFloor?700:400,
+                            color:isCurRow?"#38bdf8":isFloor?"#34d399":belowFloor?"#f87171":"#64748b",
+                            fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                            ${cca.toFixed(0)}
+                          </div>
+                          {isFloor&&<div style={{fontSize:6,color:"#34d399"}}>floor</div>}
+                          {isCurRow&&<div style={{fontSize:6,color:"#38bdf8"}}>current</div>}
+                          {belowFloor&&!isCurRow&&intrinsic>0&&(
+                            <div style={{fontSize:7,color:"#f87171",fontFamily:"'IBM Plex Mono',monospace"}}>
+                              −{intrinsic.toFixed(2)}
+                            </div>
+                          )}
+                        </div>
 
-                  {/* Seller model panel */}
-                  <div className="panel">
-                    <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:12}}>
-                      Seller View — BS Put on CCA at Floor
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-                      <div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Model</div>
-                        <div style={{fontSize:9,color:"#fb923c",lineHeight:1.6}}>
-                          ACP = basis mid<br/>
-                          + Put(F_CCA, K_floor, T, σ_CCA)<br/>
-                          <span style={{color:"#334155"}}>gives away floor put to buyer</span>
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:3}}>CCA Vol at Floor Strike</div>
-                        <div style={{fontSize:22,fontWeight:700,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace"}}>
-                          {(sellerCcaVol*100).toFixed(1)}%
-                        </div>
-                        <div style={{fontSize:8,color:"#334155",marginTop:2}}>
-                          from vol surface at K=${selK.toFixed(2)}
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:10}}>
-                      {[
-                        {label:"Floor Put",val:`$${sellerPutVal.toFixed(3)}`,color:"#fb923c"},
-                        {label:"ACP Fair",val:`${sellerAcpFair>=0?"+":""}${sellerAcpFair.toFixed(3)}`,color:"#38bdf8"},
-                        {label:"P(floor)",val:`${(sellerPFloor*100).toFixed(1)}%`,color:sellerPFloor>0.1?"#f87171":"#34d399"},
-                        {label:"Put Δ",val:`${sellerDelta.toFixed(3)}`,color:"#a78bfa"},
-                      ].map(({label,val,color})=>(
-                        <div key={label} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"5px 7px",textAlign:"center"}}>
-                          <div style={{fontSize:7,color:"#334155",marginBottom:2}}>{label}</div>
-                          <div style={{fontSize:11,fontWeight:700,color,fontFamily:"'IBM Plex Mono',monospace"}}>{val}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* Put value across CCA vol */}
-                    <div style={{fontSize:7,color:"#334155",marginBottom:5,letterSpacing:"0.08em",textTransform:"uppercase"}}>
-                      Floor Put Value vs CCA Implied Vol
-                    </div>
-                    <div style={{overflowX:"auto"}}>
-                      <div style={{display:"flex",gap:3,minWidth:"max-content"}}>
-                        {ccaVolSteps.map(v=>{
-                          const pv = bsPut(selF, selK, selT, r, v);
-                          const isCurrentVol = Math.abs(v-sellerCcaVol)<0.025;
-                          const barH = Math.min(40, (pv/1.5)*40);
+                        {/* Put value cells */}
+                        {volCols.map(vol=>{
+                          const pv = acpPutFair(cca, selK, selT, vol);
+                          const isCurCell = isCurRow && Math.abs(vol-selSigma)<0.025;
+                          const isMktCell = selMktMid!=null && Math.abs(pv-selMktMid)<0.005 && Math.abs(vol-selSigma)<0.025;
+                          // Color: put value scale — deeper red = more valuable put = worse for buyer
+                          const intensity = Math.min(1, pv/3);
+                          const bg = isCurCell ? "rgba(56,189,248,0.18)"
+                                   : pv>0.5 ? `rgba(248,113,113,${0.08+intensity*0.25})`
+                                   : pv>0.1 ? `rgba(251,146,60,${0.05+intensity*0.15})`
+                                   : "#0b0f18";
                           return (
-                            <div key={v} style={{width:38,flexShrink:0,textAlign:"center"}}>
-                              <div style={{fontSize:8,fontWeight:isCurrentVol?700:400,
-                                color:isCurrentVol?"#fb923c":"#475569",marginBottom:2,fontVariantNumeric:"tabular-nums"}}>
-                                {pv.toFixed(3)}
-                              </div>
-                              <div style={{height:40,background:"#182030",borderRadius:2,display:"flex",alignItems:"flex-end",overflow:"hidden",marginBottom:2}}>
-                                <div style={{width:"100%",height:`${barH}px`,
-                                  background:isCurrentVol?"#fb923c":"#fb923c44",
-                                  borderRadius:"1px 1px 0 0",transition:"height 0.2s"}}/>
-                              </div>
-                              <div style={{fontSize:7,color:isCurrentVol?"#fb923c":"#334155"}}>
-                                {(v*100).toFixed(0)}%
+                            <div key={vol} style={{
+                              width:56,flexShrink:0,padding:"4px 3px",textAlign:"center",
+                              background:bg,
+                              border:isCurCell?"1px solid #38bdf8":isMktCell?"1px solid #34d39966":"1px solid transparent",
+                              borderRadius:2,
+                            }}>
+                              <div style={{fontSize:10,fontWeight:isCurCell?700:500,
+                                color:isCurCell?"#38bdf8":pv>1?"#f87171":pv>0.3?"#fb923c":pv>0.05?"#94a3b8":"#334155",
+                                fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                                {pv>0.001?pv.toFixed(3):"—"}
                               </div>
                             </div>
                           );
                         })}
-                      </div>
-                    </div>
-                  </div>
 
-                  {/* Model comparison + implied vol */}
-                  <div className="panel">
-                    <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:12}}>
-                      Model Comparison — Buyer vs Seller
-                    </div>
+                        {/* P(ITM) at current vol */}
+                        <div style={{width:52,flexShrink:0,padding:"4px 3px",textAlign:"center",background:"#0b0f18",borderRadius:2}}>
+                          <div style={{fontSize:10,fontVariantNumeric:"tabular-nums",
+                            color:pITM>0.3?"#f87171":pITM>0.1?"#fb923c":pITM>0.02?"#64748b":"#334155"}}>
+                            {(pITM*100).toFixed(1)}%
+                          </div>
+                        </div>
 
-                    {/* Side by side comparison */}
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 4px 1fr",gap:"0 10px",marginBottom:14,alignItems:"start"}}>
-                      <div style={{background:"rgba(56,189,248,0.05)",border:"1px solid #38bdf822",borderRadius:3,padding:"10px 12px"}}>
-                        <div style={{fontSize:8,color:"#38bdf8",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:8,fontWeight:700}}>Buyer View</div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Model</div>
-                        <div style={{fontSize:9,color:"#475569",marginBottom:8}}>Bachelier call on basis</div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Index Fair</div>
-                        <div style={{fontSize:18,fontWeight:700,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8}}>
-                          {selIndexFair>=0?"+":""}{selIndexFair.toFixed(3)}
-                        </div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Floor Premium</div>
-                        <div style={{fontSize:12,fontWeight:600,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8}}>+{selFloorOpt.toFixed(3)}</div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Implied CCA Vol</div>
-                        <div style={{fontSize:14,fontWeight:700,color:"#a78bfa",fontFamily:"'IBM Plex Mono',monospace"}}>
-                          {impliedVol>0?(impliedVol*100).toFixed(1)+"%" : "—"}
-                        </div>
-                        <div style={{fontSize:7,color:"#334155",marginTop:2}}>from floor opt value</div>
-                      </div>
-                      <div style={{background:"#182030",alignSelf:"stretch"}}/>
-                      <div style={{background:"rgba(251,146,60,0.05)",border:"1px solid #fb923c22",borderRadius:3,padding:"10px 12px"}}>
-                        <div style={{fontSize:8,color:"#fb923c",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:8,fontWeight:700}}>Seller View</div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Model</div>
-                        <div style={{fontSize:9,color:"#475569",marginBottom:8}}>BS put on CCA at floor</div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>ACP Fair</div>
-                        <div style={{fontSize:18,fontWeight:700,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8}}>
-                          {sellerAcpFair>=0?"+":""}{sellerAcpFair.toFixed(3)}
-                        </div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Floor Put Value</div>
-                        <div style={{fontSize:12,fontWeight:600,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8}}>+{sellerPutVal.toFixed(3)}</div>
-                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>CCA Vol at Floor</div>
-                        <div style={{fontSize:14,fontWeight:700,color:"#a78bfa",fontFamily:"'IBM Plex Mono',monospace"}}>
-                          {(sellerCcaVol*100).toFixed(1)}%
-                        </div>
-                        <div style={{fontSize:7,color:"#334155",marginTop:2}}>from vol surface</div>
-                      </div>
-                    </div>
-
-                    {/* Divergence */}
-                    <div style={{background:"#070b10",border:`1px solid ${Math.abs(modelDivergence)>0.05?"#fb923c44":"#182030"}`,borderRadius:3,padding:"10px 14px"}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                        <div style={{fontSize:8,color:"#475569",letterSpacing:"0.1em",textTransform:"uppercase"}}>Model Divergence</div>
-                        <div style={{fontSize:16,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",
-                          color:Math.abs(modelDivergence)<0.01?"#34d399":Math.abs(modelDivergence)<0.05?"#fb923c":"#f87171",
-                          fontVariantNumeric:"tabular-nums"}}>
-                          {modelDivergence>=0?"+":""}{modelDivergence.toFixed(4)}
+                        {/* Max loss if CCA stays at this level */}
+                        <div style={{width:52,flexShrink:0,padding:"4px 3px",textAlign:"center",background:"#0b0f18",borderRadius:2}}>
+                          <div style={{fontSize:10,fontVariantNumeric:"tabular-nums",
+                            color:intrinsic>2?"#f87171":intrinsic>0.5?"#fb923c":"#334155"}}>
+                            {intrinsic>0?`-${intrinsic.toFixed(2)}`:"—"}
+                          </div>
                         </div>
                       </div>
-                      <div style={{fontSize:8,color:"#334155",lineHeight:1.6}}>
-                        {Math.abs(modelDivergence)<0.005
-                          ? <span style={{color:"#34d399"}}>✓ Models agree — CCA vol surface consistent with basis vol assumption</span>
-                          : modelDivergence>0
-                          ? <span>Seller model prices <span style={{color:"#fb923c"}}>+{modelDivergence.toFixed(4)} richer</span> than buyer model. CCA vol surface implies more floor value than basis vol suggests — seller should demand higher ACP price.</span>
-                          : <span>Buyer model prices <span style={{color:"#38bdf8"}}>{Math.abs(modelDivergence).toFixed(4)} richer</span> than seller model. Basis vol implies more floor value than CCA vol surface — buyer is paying up for floor optionality.</span>
-                        }
-                      </div>
-                      {impliedVol>0&&(
-                        <div style={{marginTop:8,padding:"6px 10px",background:"#0b0f18",borderRadius:2,fontSize:8,color:"#475569"}}>
-                          To reconcile: CCA vol surface needs to be at&nbsp;
-                          <span style={{color:"#a78bfa",fontWeight:700,fontFamily:"'IBM Plex Mono',monospace"}}>
-                            {(impliedVol*100).toFixed(1)}%
-                          </span>
-                          &nbsp;at K=${selK.toFixed(2)} for models to agree.
-                          Currently at <span style={{color:"#fb923c"}}>{(sellerCcaVol*100).toFixed(1)}%</span>.
-                          {Math.abs(impliedVol-sellerCcaVol)>0.005&&(
-                            <span> Difference: <span style={{color:impliedVol>sellerCcaVol?"#f87171":"#34d399",fontWeight:700}}>
-                              {impliedVol>sellerCcaVol?"vol surface too low — selling ACP gives away floor put too cheap":
-                               "vol surface too high — ACP buyers are overpaying for floor protection"}
-                            </span></span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                    );
+                  })}
                 </div>
-              );
-            })()}
+              </div>
+              <div style={{marginTop:8,display:"flex",gap:16,fontSize:7,color:"#334155",flexWrap:"wrap"}}>
+                <span><span style={{color:"#38bdf8"}}>■</span> current CCA + vol</span>
+                <span style={{color:"#f87171"}}>■ deep red = large put value = buyer has taken on significant floor risk</span>
+                <span>Max loss col = intrinsic value if CCA stays at that level to expiry</span>
+                <span>P(ITM) = probability CCA ends below floor at expiry at current vol</span>
+              </div>
+            </div>
+
+            {/* ── All contracts summary ── */}
+            <div className="panel">
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                All ACP Contracts — Short Put Fair Values
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <div style={{display:"grid",
+                  gridTemplateColumns:"72px 68px 62px 62px 62px 72px 60px 60px 80px 80px 80px",
+                  gap:"0 6px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",
+                  padding:"4px 8px",borderBottom:"1px solid #1a2840",marginBottom:2,minWidth:780}}>
+                  <span>ACP</span><span>Delivers</span>
+                  <span style={{textAlign:"right"}}>CCA Fwd</span>
+                  <span style={{textAlign:"right"}}>Floor</span>
+                  <span style={{textAlign:"right"}}>OTM%</span>
+                  <span style={{textAlign:"right"}}>Put Fair</span>
+                  <span style={{textAlign:"right"}}>P(ITM)</span>
+                  <span style={{textAlign:"right"}}>Vol@K</span>
+                  <span style={{textAlign:"right"}}>Mkt Bid/Ask</span>
+                  <span style={{textAlign:"right"}}>Imp Vol</span>
+                  <span style={{textAlign:"right"}}>Rich/Cheap</span>
+                </div>
+                {ACP_CONTRACTS.map((acp,idx)=>{
+                  const cD=expiryPriceMap[acp.deliveredCCA];
+                  const F=cD?.price??anchorPrice;
+                  const K=floorForYear(acp.year);
+                  const ad=new Date(acp.year,acp.month,15);
+                  const T=Math.max((ad-today)/(365*24*3600*1000),0.003);
+                  const sig=strikeVol(K,F,atmVol,skew,convexity,perStrikeAdj[Math.round(K)]||0);
+                  const putFair=acpPutFair(F,K,T,sig);
+                  const pITM=acpPFloor(F,K,T,sig);
+                  const mBid=acpGetParam(acp.label,'mktBid',null);
+                  const mAsk=acpGetParam(acp.label,'mktAsk',null);
+                  const mMid=mBid!=null&&mAsk!=null?(mBid+mAsk)/2:null;
+                  const iVol=mMid!=null?impliedVol(mMid,F,K,T):null;
+                  const rc=mMid!=null?mMid-putFair:null;
+                  const isSel=acp.label===acpSelContract;
+                  const otm=((F/K-1)*100);
+                  return (
+                    <div key={acp.label} onClick={()=>setAcpSelContract(acp.label)}
+                      className="rh" style={{
+                        display:"grid",
+                        gridTemplateColumns:"72px 68px 62px 62px 62px 72px 60px 60px 80px 80px 80px",
+                        gap:"0 6px",alignItems:"center",padding:"6px 8px",
+                        borderBottom:"1px solid #0a0e14",cursor:"pointer",
+                        background:isSel?"rgba(56,189,248,0.08)":idx%2===0?"#0b0f18":"#090c14",
+                        borderLeft:isSel?"3px solid #38bdf8":"3px solid transparent",
+                        minWidth:780,
+                      }}>
+                      <div style={{fontSize:11,fontWeight:700,color:isSel?"#38bdf8":"#d0dcea"}}>{acp.label}</div>
+                      <div style={{fontSize:10,color:"#7dd3fc"}}>{acp.deliveredCCA}</div>
+                      <div style={{textAlign:"right",fontSize:11,color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>${F.toFixed(2)}</div>
+                      <div style={{textAlign:"right",fontSize:11,color:"#34d399",fontVariantNumeric:"tabular-nums"}}>${K.toFixed(2)}</div>
+                      <div style={{textAlign:"right",fontSize:10,color:otm>5?"#34d399":otm>2?"#fb923c":"#f87171",fontVariantNumeric:"tabular-nums"}}>
+                        {otm>0?"+":""}{otm.toFixed(1)}%
+                      </div>
+                      <div style={{textAlign:"right",fontSize:12,fontWeight:700,color:"#38bdf8",fontVariantNumeric:"tabular-nums"}}>
+                        {putFair.toFixed(4)}
+                      </div>
+                      <div style={{textAlign:"right",fontSize:10,fontVariantNumeric:"tabular-nums",
+                        color:pITM>0.15?"#f87171":pITM>0.05?"#fb923c":"#34d399"}}>
+                        {(pITM*100).toFixed(1)}%
+                      </div>
+                      <div style={{textAlign:"right",fontSize:10,color:"#fb923c",fontVariantNumeric:"tabular-nums"}}>
+                        {(sig*100).toFixed(1)}%
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        {mBid!=null||mAsk!=null?(
+                          <span style={{fontSize:10,fontVariantNumeric:"tabular-nums"}}>
+                            <span style={{color:"#34d399"}}>{mBid!=null?(mBid>=0?"+":"")+mBid.toFixed(2):"—"}</span>
+                            <span style={{color:"#334155",margin:"0 2px"}}>/</span>
+                            <span style={{color:"#f87171"}}>{mAsk!=null?(mAsk>=0?"+":"")+mAsk.toFixed(2):"—"}</span>
+                          </span>
+                        ):<span style={{fontSize:9,color:"#1e2d3d"}}>—</span>}
+                      </div>
+                      <div style={{textAlign:"right",fontSize:10,color:"#a78bfa",fontVariantNumeric:"tabular-nums"}}>
+                        {iVol!=null&&iVol>0?(iVol*100).toFixed(1)+"%":"—"}
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        {rc!=null?(
+                          <div>
+                            <div style={{fontSize:11,fontWeight:600,color:rc>0?"#34d399":"#f87171",fontVariantNumeric:"tabular-nums"}}>
+                              {rc>=0?"+":""}{rc.toFixed(4)}
+                            </div>
+                            <div style={{fontSize:7,color:"#334155"}}>{rc>0?"buyer favourable":"buyer unfavourable"}</div>
+                          </div>
+                        ):<span style={{fontSize:9,color:"#1e2d3d"}}>—</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{marginTop:10,borderTop:"1px solid #182030",paddingTop:8,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
+              <span>ACP buyer = SHORT PUT on CCA at floor strike · Put fair = BS Put(F_CCA, K_floor, T, σ_CCA) · Buyer receives index price as put premium</span>
+              <span>Rich = mkt mid above model fair (buyer receiving more than fair put premium) · Cheap = buyer under-compensated for floor risk</span>
+            </div>
+          </div>
+        );
+      })()}
 
             {/* ── Scenario grid: CCA price (rows) × basis vol (cols) ── */}
             <div className="panel" style={{marginBottom:14}}>
