@@ -1111,6 +1111,9 @@ function CCADesk({ fbData, syncStatus }) {
 
   // ── Options state
   const [selectedExpiry,setSelectedExpiry] = useState("Dec-26");
+  // Market view: 3 simultaneous chains
+  const [mvExpiries,setMvExpiries] = useState(["Jun-26","Dec-26","Dec-27"]);
+  function setMvExpiry(slot,key){ setMvExpiries(p=>p.map((e,i)=>i===slot?key:e)); }
   const [greeksMode,setGreeksMode]         = useState(false);
   const [showBidAsk,setShowBidAsk]         = useState(false);
   const [tab,setTab]                       = useState(0);
@@ -1866,101 +1869,160 @@ function CCADesk({ fbData, syncStatus }) {
             })()}
           </div>
 
-          {/* Clean read-only chain — strike in middle, sticky header */}
-          <div style={{overflowX:"auto"}}>
-            <div style={{minWidth:600}}>
-              {/* Sticky col header */}
-              <div style={{
-                position:"sticky",top:0,zIndex:10,
-                background:"#070b10",
-                borderBottom:"2px solid #1a2840",
-                display:"grid",
-                gridTemplateColumns:"90px 90px 3px 130px 70px 3px 90px 90px",
-                padding:"7px 12px",
-              }}>
-                <span style={{fontSize:9,color:"#93c5fd",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"right",paddingRight:8,fontWeight:700}}>CALL</span>
-                <span style={{fontSize:9,color:"#93c5fd66",letterSpacing:"0.08em",textTransform:"uppercase",textAlign:"right",paddingRight:4}}>Delta</span>
-                <span/>
-                <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:10}}>
-                  <span style={{fontSize:9,color:"#ffffff99",letterSpacing:"0.12em",textTransform:"uppercase"}}>Strike</span>
-                  <span style={{fontSize:8,color:"#c4b5fd44",letterSpacing:"0.08em",textTransform:"uppercase"}}>Vol%</span>
-                </div>
-                <span/>
-                <span/>
-                <span style={{fontSize:9,color:"#fca5a5",letterSpacing:"0.12em",textTransform:"uppercase",textAlign:"left",paddingLeft:8,fontWeight:700}}>PUT</span>
-                <span style={{fontSize:9,color:"#fca5a566",letterSpacing:"0.08em",textTransform:"uppercase",textAlign:"left",paddingLeft:4}}>Delta</span>
-              </div>
+          {/* ── Three chains side by side ── */}
+          {(()=>{
+            const SLOT_COLORS = ["#38bdf8","#34d399","#a78bfa"];
+            return (
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,alignItems:"start"}}>
+                {[0,1,2].map(slot=>{
+                  const expKey  = mvExpiries[slot];
+                  const expData = expiryPriceMap[expKey] || Object.values(expiryPriceMap)[0];
+                  const slotF   = expData?.price ?? anchorPrice;
+                  const slotT   = expData?.T ?? 0.5;
+                  const slotR   = baseRate/100;
+                  const slotVol = (K)=>strikeVol(K,slotF,atmVol,skew,convexity,perStrikeAdj[K]||0);
+                  const slotRows = STRIKES.map(K=>{
+                    const s=slotVol(K);
+                    return {K,s,
+                      call:bsCall(slotF,K,slotT,slotR,s),
+                      put:bsPut(slotF,K,slotT,slotR,s),
+                      cDelta:bsDelta(slotF,K,slotT,slotR,s,true),
+                      pDelta:bsDelta(slotF,K,slotT,slotR,s,false),
+                    };
+                  });
+                  const col = SLOT_COLORS[slot];
+                  return (
+                    <div key={slot} style={{
+                      background:"#0b0f18",
+                      border:`1px solid ${col}33`,
+                      borderRadius:3,
+                      overflow:"hidden",
+                    }}>
+                      {/* Slot header — expiry selector */}
+                      <div style={{
+                        padding:"8px 10px",
+                        background:`${col}0a`,
+                        borderBottom:`1px solid ${col}22`,
+                        display:"flex",flexDirection:"column",gap:5,
+                      }}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={{fontSize:8,color:col,letterSpacing:"0.12em",fontWeight:700,textTransform:"uppercase"}}>
+                            Chain {slot+1}
+                          </span>
+                          <span style={{fontSize:9,color:"#334155"}}>
+                            F=<span style={{color:col,fontWeight:600}}>${slotF.toFixed(2)}</span>
+                            &nbsp;T=<span style={{color:"#475569"}}>{(slotT*365).toFixed(0)}d</span>
+                          </span>
+                        </div>
+                        {/* Expiry picker — compact scrollable row */}
+                        <div style={{overflowX:"auto",paddingBottom:2}}>
+                          <div style={{display:"flex",gap:3,minWidth:"max-content"}}>
+                            {OPTIONS_EXPIRIES.map(e=>{
+                              const key=`${MONTHS[e.month].slice(0,3)}-${String(e.year).slice(2)}`;
+                              const isSel=expKey===key;
+                              return (
+                                <button key={key} onClick={()=>{
+                                  setMvExpiry(slot,key);
+                                  setSelectedExpiry(key); // keep options chain in sync
+                                }} style={{
+                                  padding:"3px 7px",fontFamily:"'IBM Plex Mono',monospace",
+                                  fontSize:9,fontWeight:isSel?700:400,
+                                  borderRadius:2,cursor:"pointer",border:"1px solid",
+                                  borderColor:isSel?col:"#182030",
+                                  background:isSel?`${col}18`:"transparent",
+                                  color:isSel?col:"#475569",
+                                  whiteSpace:"nowrap",transition:"all 0.1s",
+                                }}>
+                                  {key}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
 
-              {rows.map((row,idx)=>{
-                const isATM   = Math.abs(row.K-F)<0.5;
-                const isNear  = Math.abs(row.K-F)<2;
-                return (
-                  <div key={row.K} style={{
-                    display:"grid",
-                    gridTemplateColumns:"90px 90px 3px 130px 70px 3px 90px 90px",
-                    padding:isATM?"10px 12px":"5px 12px",
-                    borderBottom:"1px solid",
-                    borderBottomColor:isNear?"#141e2c":"#0b0d10",
-                    background:isATM?"rgba(56,189,248,0.06)":idx%2===0?"transparent":"rgba(255,255,255,0.007)",
-                    borderLeft:isATM?"3px solid #38bdf8":"3px solid transparent",
-                    alignItems:"center",
-                    transition:"background 0.1s",
-                  }}>
-                    {/* Call price — light blue */}
-                    <div style={{textAlign:"right",paddingRight:8}}>
-                      <span style={{
-                        fontSize:isATM?16:13,fontWeight:600,
-                        color:row.call<0.005?"#1a2535":"#93c5fd",
-                        fontVariantNumeric:"tabular-nums"
+                      {/* Column headers */}
+                      <div style={{
+                        display:"grid",
+                        gridTemplateColumns:"1fr 3px 48px 3px 1fr",
+                        padding:"5px 8px",
+                        borderBottom:`1px solid #1a2840`,
+                        fontSize:8,
                       }}>
-                        {row.call<0.005?"—":row.call.toFixed(2)}
-                      </span>
+                        <span style={{color:"#93c5fd",textAlign:"right",paddingRight:4,fontWeight:700,letterSpacing:"0.1em"}}>CALL</span>
+                        <span/>
+                        <span style={{textAlign:"center",color:"#ffffff66",letterSpacing:"0.1em"}}>STK</span>
+                        <span/>
+                        <span style={{color:"#fca5a5",textAlign:"left",paddingLeft:4,fontWeight:700,letterSpacing:"0.1em"}}>PUT</span>
+                      </div>
+
+                      {/* Chain rows */}
+                      <div style={{maxHeight:560,overflowY:"auto"}}>
+                        {slotRows.map((row,idx)=>{
+                          const isATM=Math.abs(row.K-slotF)<0.5;
+                          const isNear=Math.abs(row.K-slotF)<2;
+                          return (
+                            <div key={row.K} style={{
+                              display:"grid",
+                              gridTemplateColumns:"1fr 3px 48px 3px 1fr",
+                              padding:isATM?"7px 8px":"4px 8px",
+                              borderBottom:"1px solid",
+                              borderBottomColor:isNear?"#141e2c":"#0a0d12",
+                              background:isATM?`${col}0f`:idx%2===0?"transparent":"rgba(255,255,255,0.005)",
+                              borderLeft:isATM?`2px solid ${col}`:"2px solid transparent",
+                              alignItems:"center",
+                            }}>
+                              {/* Call */}
+                              <div style={{textAlign:"right",paddingRight:6}}>
+                                <div style={{fontSize:isATM?13:11,fontWeight:600,color:row.call<0.005?"#1a2535":"#93c5fd",fontVariantNumeric:"tabular-nums"}}>
+                                  {row.call<0.005?"—":row.call.toFixed(2)}
+                                </div>
+                                <div style={{fontSize:8,color:"#93c5fd55",fontVariantNumeric:"tabular-nums"}}>
+                                  {row.cDelta.toFixed(2)}
+                                </div>
+                              </div>
+                              {/* Divider */}
+                              <div style={{width:1,background:isATM?`${col}44`:"#182030",alignSelf:"stretch"}}/>
+                              {/* Strike */}
+                              <div style={{textAlign:"center"}}>
+                                <div style={{fontSize:isATM?14:12,fontWeight:700,color:"#ffffff",fontVariantNumeric:"tabular-nums"}}>
+                                  {row.K}
+                                </div>
+                                <div style={{fontSize:7,color:"#a78bfa66",fontVariantNumeric:"tabular-nums"}}>
+                                  {(row.s*100).toFixed(1)}%
+                                </div>
+                              </div>
+                              {/* Divider */}
+                              <div style={{width:1,background:isATM?`${col}44`:"#182030",alignSelf:"stretch"}}/>
+                              {/* Put */}
+                              <div style={{textAlign:"left",paddingLeft:6}}>
+                                <div style={{fontSize:isATM?13:11,fontWeight:600,color:row.put<0.005?"#1a2535":"#fca5a5",fontVariantNumeric:"tabular-nums"}}>
+                                  {row.put<0.005?"—":row.put.toFixed(2)}
+                                </div>
+                                <div style={{fontSize:8,color:"#fca5a555",fontVariantNumeric:"tabular-nums"}}>
+                                  {row.pDelta.toFixed(2)}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Slot footer */}
+                      <div style={{padding:"5px 8px",borderTop:"1px solid #182030",fontSize:7,color:"#1e2d3d",display:"flex",justifyContent:"space-between"}}>
+                        <span>ATM {(atmVol*100).toFixed(1)}%</span>
+                        <span>{expKey}</span>
+                      </div>
                     </div>
-                    {/* Call delta */}
-                    <span style={{fontSize:10,color:"#93c5fd66",textAlign:"right",paddingRight:8,fontVariantNumeric:"tabular-nums"}}>
-                      {row.cDelta.toFixed(2)}
-                    </span>
-                    {/* Left divider */}
-                    <div style={{width:1,background:isATM?"#ffffff22":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
-                    {/* Strike CENTRE — bold white */}
-                    <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:10}}>
-                      <span style={{
-                        fontSize:isATM?18:14,fontWeight:700,
-                        color:"#ffffff",
-                        fontVariantNumeric:"tabular-nums",letterSpacing:"0.01em"
-                      }}>
-                        {row.K}
-                      </span>
-                      <span style={{fontSize:9,color:"#c4b5fd55",fontVariantNumeric:"tabular-nums"}}>
-                        {(row.s*100).toFixed(1)}
-                      </span>
-                    </div>
-                    {/* spacer col */}
-                    <span/>
-                    {/* Right divider */}
-                    <div style={{width:1,background:isATM?"#ffffff22":"#182030",alignSelf:"stretch",margin:"2px 0"}}/>
-                    {/* Put price — light red */}
-                    <div style={{textAlign:"left",paddingLeft:8}}>
-                      <span style={{
-                        fontSize:isATM?16:13,fontWeight:600,
-                        color:row.put<0.005?"#1a2535":"#fca5a5",
-                        fontVariantNumeric:"tabular-nums"
-                      }}>
-                        {row.put<0.005?"—":row.put.toFixed(2)}
-                      </span>
-                    </div>
-                    {/* Put delta */}
-                    <span style={{fontSize:10,color:"#fca5a566",textAlign:"left",paddingLeft:4,fontVariantNumeric:"tabular-nums"}}>
-                      {row.pDelta.toFixed(2)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
           <div style={{marginTop:12,display:"flex",justifyContent:"space-between",fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
-            <span>Read-only view — edit vol params in Options Chain tab</span>
-            <span>ITM calls green  |  ITM puts red  |  ATM highlighted</span>
+            <span>Read-only view — click any expiry button to swap chain · edit vol params in Options Chain tab</span>
+            <span>Calls light blue · Puts light red · Strike bold white · Delta below price</span>
           </div>
         </div>
       )}
