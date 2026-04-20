@@ -97,6 +97,391 @@ function PasswordGate({ onUnlock }) {
           Authorised users only
         </div>
       </div>
+
+      {/* ════════════ LCFS TAB ════════════ */}
+      {tab===7 && (()=>{
+        const today = new Date();
+        const lcfsExpData = lcfsPriceMap[lcfsSelExpiry] || Object.values(lcfsPriceMap)[0];
+        const lcfsF = lcfsExpData?.price ?? lcfsAnchor;
+        const lcfsT = lcfsExpData?.T ?? 0.5;
+        const lcfsR = lcfsBaseRate/100;
+        const lcfsRows = LCFS_STRIKES.map(K=>{
+          const s=lcfsStrikeVol(K,lcfsF);
+          return {K,s,
+            call:bsCall(lcfsF,K,lcfsT,lcfsR,s),
+            put:bsPut(lcfsF,K,lcfsT,lcfsR,s),
+            cDelta:bsDelta(lcfsF,K,lcfsT,lcfsR,s,true),
+            pDelta:bsDelta(lcfsF,K,lcfsT,lcfsR,s,false),
+            gamma:bsGamma(lcfsF,K,lcfsT,lcfsR,s),
+            cTheta:bsTheta(lcfsF,K,lcfsT,lcfsR,s,true),
+            pTheta:bsTheta(lcfsF,K,lcfsT,lcfsR,s,false),
+            vega:bsVega(lcfsF,K,lcfsT,lcfsR,s),
+          };
+        });
+        const minP=Math.min(...lcfsCurve.map(c=>c.price));
+        const maxP=Math.max(...lcfsCurve.map(c=>c.price));
+        const pRange=maxP-minP||1;
+        // Spread calc
+        const lcfsNearData=lcfsPriceMap[lcfsSpreadNear];
+        const lcfsFarData=lcfsPriceMap[lcfsSpreadFar];
+        const lcfsSpread=lcfsNearData&&lcfsFarData&&lcfsSpreadNear!==lcfsSpreadFar
+          ?{spread:lcfsFarData.price-lcfsNearData.price,
+            pct:(lcfsFarData.price-lcfsNearData.price)/lcfsNearData.price*100,
+            ann:Math.abs(lcfsFarData.T-lcfsNearData.T)>0
+              ?Math.log(lcfsFarData.price/lcfsNearData.price)/Math.abs(lcfsFarData.T-lcfsNearData.T)*100:0}
+          :null;
+
+        return (
+          <div>
+            {/* ── Sticky header: anchor + vol params ── */}
+            <div style={{position:"sticky",top:0,zIndex:20,background:"#070b10",
+              borderBottom:"1px solid #182030",paddingBottom:12,paddingTop:6,marginBottom:14}}>
+              <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
+                {/* Anchor */}
+                <div className="panel" style={{display:"flex",gap:10,alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:8,color:"#475569",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:4}}>LCFS Anchor (Dec-26)</div>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <span style={{color:"#fb923c",fontSize:13}}>$</span>
+                      <input type="number" step="0.25" value={lcfsAnchorInput}
+                        onChange={e=>{setLcfsAnchorInput(e.target.value);markEditing();}}
+                        onKeyDown={e=>{if(e.key==="Enter"){commitLcfsAnchor(e.target.value);markEditing();e.target.blur();}}}
+                        style={{background:"transparent",border:"none",borderBottom:"2px solid #fb923c",
+                          color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace",fontSize:22,fontWeight:700,
+                          width:90,outline:"none",padding:"2px 0"}}/>
+                      <span style={{fontSize:10,color:"#475569"}}>/MT</span>
+                    </div>
+                  </div>
+                  <div style={{borderLeft:"1px solid #182030",paddingLeft:10,display:"flex",gap:16,alignItems:"center"}}>
+                    <span style={{fontSize:10,color:"#334155"}}>Base rate <span style={{color:"#64748b",fontWeight:600}}>{lcfsBaseRate.toFixed(2)}%</span></span>
+                    <span style={{fontSize:10,color:"#334155"}}>ATM <span style={{color:"#38bdf8",fontWeight:600}}>{(lcfsAtmVol*100).toFixed(1)}%</span></span>
+                    <span style={{fontSize:10,color:"#334155"}}>Skew <span style={{color:"#fb923c",fontWeight:600}}>{lcfsSkew>=0?"+":""}{(lcfsSkew*100).toFixed(1)}%</span></span>
+                    <span style={{fontSize:10,color:"#334155"}}>Cvx <span style={{color:"#a78bfa",fontWeight:600}}>{(lcfsConvexity*100).toFixed(1)}%</span></span>
+                  </div>
+                </div>
+                {/* Vol sliders inline */}
+                <div className="panel" style={{flex:1,minWidth:300}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 10px"}}>
+                    <VolSlider label="ATM Vol" value={lcfsAtmVol*100} min={5} max={150} step={0.5}
+                      onChange={v=>setLcfsAtmVol(v/100)} color="#38bdf8" format={v=>`${v.toFixed(1)}%`}/>
+                    <VolSlider label="Skew" value={lcfsSkew*100} min={-30} max={15} step={0.25}
+                      onChange={v=>setLcfsSkew(v/100)} color="#fb923c"
+                      format={v=>`${v>=0?"+":""}${v.toFixed(1)}%`}/>
+                    <VolSlider label="Convexity" value={lcfsConvexity*100} min={0} max={80} step={0.25}
+                      onChange={v=>setLcfsConvexity(v/100)} color="#a78bfa" format={v=>`${v.toFixed(1)}%`}/>
+                  </div>
+                </div>
+              </div>
+
+              {/* Expiry selector + display toggles */}
+              <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                {LCFS_OPT_EXPIRIES.map(e=>{
+                  const isSel=lcfsSelExpiry===e.label;
+                  const cp=lcfsPriceMap[e.label];
+                  return (
+                    <button key={e.label} onClick={()=>setLcfsSelExpiry(e.label)} style={{
+                      padding:"4px 10px",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,
+                      fontWeight:isSel?700:400,borderRadius:2,cursor:"pointer",border:"1px solid",
+                      borderColor:isSel?"#fb923c":"#182030",
+                      background:isSel?"rgba(251,146,60,0.10)":"#0b0f18",
+                      color:isSel?"#fb923c":"#475569",transition:"all 0.12s",
+                      display:"flex",flexDirection:"column",alignItems:"center",gap:1,
+                    }}>
+                      <span>{e.label}</span>
+                      {cp&&<span style={{fontSize:8,color:isSel?"#fdba74":"#334155",fontWeight:600}}>${cp.price.toFixed(2)}</span>}
+                    </button>
+                  );
+                })}
+                <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+                  <button className={`gtog${lcfsGreeks?" on":""}`} onClick={()=>setLcfsGreeks(g=>!g)}>
+                    {lcfsGreeks?"Hide Greeks":"Show Greeks"}
+                  </button>
+                  <button onClick={()=>setLcfsShowBidAsk(b=>!b)} style={{
+                    cursor:"pointer",fontSize:8,letterSpacing:"0.1em",padding:"3px 8px",
+                    border:`1px solid ${lcfsShowBidAsk?"#34d39955":"#182030"}`,
+                    borderRadius:2,fontFamily:"'IBM Plex Mono',monospace",
+                    background:lcfsShowBidAsk?"rgba(52,211,153,0.08)":"transparent",
+                    color:lcfsShowBidAsk?"#34d399":"#475569",transition:"all 0.15s",
+                  }}>
+                    {lcfsShowBidAsk?"Mid Value":"Bid / Ask"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Main content: options chain + curve side by side ── */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 360px",gap:14,alignItems:"start"}}>
+
+              {/* LEFT: Options chain */}
+              <div>
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#fb923c",textTransform:"uppercase",marginBottom:6}}>
+                  Options Chain — {lcfsSelExpiry} &nbsp;
+                  <span style={{color:"#334155"}}>F=${lcfsF.toFixed(2)} · T={(lcfsT*365).toFixed(0)}d · ATM={((lcfsAtmVol)*100).toFixed(1)}%</span>
+                </div>
+                <div style={{overflowX:"auto"}}>
+                  <div style={{minWidth:520}}>
+                    {/* Header */}
+                    <div style={{
+                      display:"grid",
+                      gridTemplateColumns:lcfsGreeks?"70px 55px 45px 45px 70px 3px 90px 60px 3px 70px 55px 45px 45px 70px":"70px 55px 70px 3px 90px 60px 3px 70px 55px 70px",
+                      gap:"0 4px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",
+                      padding:"5px 8px",borderBottom:"2px solid #1a2840",
+                      position:"sticky",top:0,zIndex:10,background:"#070b10",
+                    }}>
+                      {lcfsGreeks&&<><span style={{color:"#93c5fd44",textAlign:"right"}}>Vega</span><span style={{color:"#93c5fd44",textAlign:"right"}}>Θ/d</span><span style={{color:"#93c5fd44",textAlign:"right"}}>Γ</span></>}
+                      <span style={{color:"#93c5fd",textAlign:"right",fontWeight:700}}>{lcfsShowBidAsk?"Bid/Ask":"Call $"}</span>
+                      <div style={{textAlign:"right",lineHeight:1.1}}>
+                        <div style={{fontSize:7,color:"#93c5fd55"}}>Δ</div>
+                        {!lcfsGreeks&&<div style={{fontSize:6,color:"#a78bfa33"}}>Vol</div>}
+                      </div>
+                      {!lcfsGreeks&&<span style={{display:"none"}}/>}
+                      <span/>
+                      <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:6}}>
+                        <span style={{color:"#ffffff99",fontWeight:700}}>Strike</span>
+                        <span style={{color:"#a78bfa44",fontSize:6}}>Vol/Adj</span>
+                      </div>
+                      {!lcfsGreeks&&<span style={{color:"#a78bfa33",textAlign:"center",fontSize:6}}>Adj</span>}
+                      <span/>
+                      <span style={{color:"#fca5a5",textAlign:"left",fontWeight:700}}>{lcfsShowBidAsk?"Bid/Ask":"Put $"}</span>
+                      <div style={{textAlign:"left",lineHeight:1.1}}>
+                        <div style={{fontSize:7,color:"#fca5a544"}}>Δ</div>
+                        {!lcfsGreeks&&<div style={{fontSize:6,color:"#a78bfa33"}}>Vol</div>}
+                      </div>
+                      {lcfsGreeks&&<><span style={{color:"#fca5a533",textAlign:"left"}}>Γ</span><span style={{color:"#fca5a533",textAlign:"left"}}>Θ/d</span><span style={{color:"#fca5a533",textAlign:"left"}}>Vega</span></>}
+                      {!lcfsGreeks&&<span style={{display:"none"}}/>}
+                    </div>
+
+                    {/* Rows */}
+                    {lcfsRows.map((row,idx)=>{
+                      const isATM=Math.abs(row.K-lcfsF)<2.6;
+                      const isNear=Math.abs(row.K-lcfsF)<12;
+                      const adj=lcfsPerStrikeAdj[row.K]||0;
+                      const halfSp=0.05;
+                      const cBid=row.call*(1-halfSp), cAsk=row.call*(1+halfSp);
+                      const pBid=row.put*(1-halfSp), pAsk=row.put*(1+halfSp);
+                      const fmtP=v=>v<0.01?"—":v.toFixed(2);
+                      return (
+                        <div key={row.K} className="rh" style={{
+                          display:"grid",
+                          gridTemplateColumns:lcfsGreeks?"70px 55px 45px 45px 70px 3px 90px 60px 3px 70px 55px 45px 45px 70px":"70px 55px 70px 3px 90px 60px 3px 70px 55px 70px",
+                          gap:"0 4px",alignItems:"center",padding:isATM?"8px 8px":"4px 8px",
+                          borderBottom:"1px solid #0a0e14",
+                          background:isATM?"rgba(251,146,60,0.07)":idx%2===0?"#0b0f18":"#090c14",
+                          borderLeft:isATM?"3px solid #fb923c":"3px solid transparent",
+                        }}>
+                          {lcfsGreeks&&<>
+                            <span style={{fontSize:9,color:"#93c5fd44",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
+                            <span style={{fontSize:9,color:"#93c5fd44",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.cTheta.toFixed(3)}</span>
+                            <span style={{fontSize:9,color:"#93c5fd44",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
+                          </>}
+                          {/* Call */}
+                          {lcfsShowBidAsk?(
+                            <div style={{textAlign:"right",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                              <span style={{fontSize:10,fontWeight:600,color:row.call<0.01?"#1e2d3d":"#93c5fd"}}>{fmtP(cBid)}</span>
+                              <span style={{fontSize:9,color:"#334155",margin:"0 2px"}}>/</span>
+                              <span style={{fontSize:10,fontWeight:600,color:row.call<0.01?"#1e2d3d":"#93c5fd"}}>{fmtP(cAsk)}</span>
+                            </div>
+                          ):(
+                            <span style={{fontSize:isATM?14:12,fontWeight:600,color:row.call<0.01?"#1e2d3d":"#93c5fd",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{fmtP(row.call)}</span>
+                          )}
+                          <div style={{textAlign:"right",lineHeight:1.2}}>
+                            <div style={{fontSize:9,color:"#93c5fd66",fontVariantNumeric:"tabular-nums"}}>{row.cDelta.toFixed(2)}</div>
+                            {!lcfsGreeks&&<div style={{fontSize:7,color:"#a78bfa55",fontVariantNumeric:"tabular-nums"}}>{(row.s*100).toFixed(1)}%</div>}
+                          </div>
+                          {!lcfsGreeks&&<span style={{display:"none"}}/>}
+                          {/* Divider */}
+                          <div style={{width:1,background:isATM?"#fb923c44":"#182030",alignSelf:"stretch"}}/>
+                          {/* Strike */}
+                          <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:5}}>
+                            <span style={{fontSize:isATM?15:12,fontWeight:700,color:"#ffffff",fontVariantNumeric:"tabular-nums"}}>{row.K}</span>
+                            {isATM&&<span style={{fontSize:7,color:"#fb923c"}}>●</span>}
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+                            <span style={{fontSize:8,color:"#a78bfa"}}>{(row.s*100).toFixed(1)}%</span>
+                            <input className="vadj" type="number" step="0.5" value={adj}
+                              onChange={e=>setLcfsPerStrikeAdj(p=>({...p,[row.K]:parseFloat(e.target.value)||0}))}/>
+                          </div>
+                          {/* Divider */}
+                          <div style={{width:1,background:isATM?"#fb923c44":"#182030",alignSelf:"stretch"}}/>
+                          {/* Put */}
+                          {lcfsShowBidAsk?(
+                            <div style={{textAlign:"left",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                              <span style={{fontSize:10,fontWeight:600,color:row.put<0.01?"#1e2d3d":"#fca5a5"}}>{fmtP(pBid)}</span>
+                              <span style={{fontSize:9,color:"#334155",margin:"0 2px"}}>/</span>
+                              <span style={{fontSize:10,fontWeight:600,color:row.put<0.01?"#1e2d3d":"#fca5a5"}}>{fmtP(pAsk)}</span>
+                            </div>
+                          ):(
+                            <span style={{fontSize:isATM?14:12,fontWeight:600,color:row.put<0.01?"#1e2d3d":"#fca5a5",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{fmtP(row.put)}</span>
+                          )}
+                          <div style={{textAlign:"left",lineHeight:1.2}}>
+                            <div style={{fontSize:9,color:"#fca5a566",fontVariantNumeric:"tabular-nums"}}>{row.pDelta.toFixed(2)}</div>
+                            {!lcfsGreeks&&<div style={{fontSize:7,color:"#fca5a533",fontVariantNumeric:"tabular-nums"}}>{(row.s*100).toFixed(1)}%</div>}
+                          </div>
+                          {lcfsGreeks&&<>
+                            <span style={{fontSize:9,color:"#fca5a533",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
+                            <span style={{fontSize:9,color:"#fca5a533",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{row.pTheta.toFixed(3)}</span>
+                            <span style={{fontSize:9,color:"#fca5a533",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
+                          </>}
+                          {!lcfsGreeks&&<span style={{display:"none"}}/>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div style={{marginTop:8,fontSize:8,color:"#182030"}}>
+                  LCFS CCF — BS Futures Options · Strikes $50–$300 · $5 increments · 100 credits/contract
+                </div>
+              </div>
+
+              {/* RIGHT: Futures curve + spread calc */}
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+
+                {/* Futures curve */}
+                <div className="panel">
+                  <div style={{fontSize:8,letterSpacing:"0.14em",color:"#fb923c",textTransform:"uppercase",marginBottom:8}}>
+                    Futures Curve — 72 Months
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,fontSize:8,color:"#334155"}}>
+                    <span>Base rate</span>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <input type="number" step="0.05" value={lcfsBaseRate.toFixed(2)}
+                        onChange={e=>setLcfsBaseRate(parseFloat(e.target.value)||0)}
+                        style={{width:52,background:"#070b10",border:"1px solid #64748b44",color:"#64748b",
+                          fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,
+                          padding:"2px 4px",textAlign:"center",outline:"none",borderRadius:2}}/>
+                      <span style={{color:"#64748b"}}>%/yr</span>
+                    </div>
+                  </div>
+                  <div style={{maxHeight:380,overflowY:"auto"}}>
+                    {/* Group by year */}
+                    {[2026,2027,2028,2029,2030,2031].map(yr=>{
+                      const yrMonths=lcfsCurve.filter(c=>c.year===yr);
+                      if(!yrMonths.length) return null;
+                      return (
+                        <div key={yr} style={{marginBottom:8}}>
+                          <div style={{fontSize:8,color:"#334155",letterSpacing:"0.08em",borderBottom:"1px solid #182030",paddingBottom:2,marginBottom:3}}>
+                            {yr}
+                          </div>
+                          {yrMonths.map((c,i)=>{
+                            const diff=(c.price-lcfsAnchor)/lcfsAnchor*100;
+                            const isQ=[2,5,8,11].includes(c.month);
+                            const isAnch=c.label==="Dec-26";
+                            const bw=Math.min(100,((c.price-minP)/pRange)*100);
+                            return (
+                              <div key={c.label} className="rh" style={{
+                                display:"grid",gridTemplateColumns:"50px 70px 1fr 45px",
+                                gap:"0 6px",alignItems:"center",padding:"3px 4px",
+                                borderBottom:"1px solid #0a0e14",
+                                background:isAnch?"rgba(251,146,60,0.09)":isQ?"rgba(251,146,60,0.03)":"transparent",
+                                borderLeft:isAnch?"2px solid #fb923c":isQ?"2px solid #fb923c33":"2px solid transparent",
+                              }}>
+                                <span style={{fontSize:9,color:isAnch?"#fb923c":isQ?"#fdba74":"#475569",fontWeight:isQ?600:400}}>
+                                  {c.label}
+                                </span>
+                                <span style={{fontSize:11,fontWeight:600,color:isAnch?"#fb923c":"#d0dcea",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
+                                  ${c.price.toFixed(2)}
+                                </span>
+                                <div style={{height:3,background:"#090d12",borderRadius:1,overflow:"hidden"}}>
+                                  <div style={{width:`${bw}%`,height:"100%",background:"linear-gradient(90deg,#fb923c44,#fb923c)",borderRadius:1,minWidth:1}}/>
+                                </div>
+                                <span style={{fontSize:8,color:diff>=0?"#34d399":"#f87171",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>
+                                  {isAnch?"—":`${diff>=0?"+":""}${diff.toFixed(1)}%`}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Spread calculator */}
+                <div className="panel">
+                  <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                    Spread Calculator
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 20px 1fr",gap:6,alignItems:"center",marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:7,color:"#334155",marginBottom:3}}>NEAR</div>
+                      <select value={lcfsSpreadNear} onChange={e=>setLcfsSpreadNear(e.target.value)}
+                        style={{width:"100%",background:"#070b10",border:"1px solid #182030",color:"#34d399",
+                          fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,
+                          padding:"4px 6px",borderRadius:2,outline:"none",cursor:"pointer"}}>
+                        {lcfsCurve.map(c=><option key={c.label} value={c.label}>{c.label} — ${c.price.toFixed(2)}</option>)}
+                      </select>
+                    </div>
+                    <div style={{textAlign:"center",fontSize:12,color:"#334155",fontWeight:600}}>/</div>
+                    <div>
+                      <div style={{fontSize:7,color:"#334155",marginBottom:3}}>FAR</div>
+                      <select value={lcfsSpreadFar} onChange={e=>setLcfsSpreadFar(e.target.value)}
+                        style={{width:"100%",background:"#070b10",border:"1px solid #182030",color:"#f87171",
+                          fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,
+                          padding:"4px 6px",borderRadius:2,outline:"none",cursor:"pointer"}}>
+                        {lcfsCurve.map(c=><option key={c.label} value={c.label}>{c.label} — ${c.price.toFixed(2)}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {lcfsSpread&&(
+                    <div style={{background:"#070b10",border:"1px solid #182030",borderRadius:3,padding:"10px 12px",marginBottom:8}}>
+                      <div style={{display:"flex",gap:12,marginBottom:8}}>
+                        <div>
+                          <div style={{fontSize:7,color:"#334155",marginBottom:2}}>SPREAD</div>
+                          <div style={{fontSize:20,fontWeight:700,color:lcfsSpread.spread>=0?"#34d399":"#f87171",fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                            {lcfsSpread.spread>=0?"+":""}{lcfsSpread.spread.toFixed(2)}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{fontSize:7,color:"#334155",marginBottom:2}}>ANN. CARRY</div>
+                          <div style={{fontSize:20,fontWeight:700,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                            {lcfsSpread.ann.toFixed(2)}%
+                          </div>
+                        </div>
+                      </div>
+                      <button onClick={()=>{
+                        const time=new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+                        const nd=lcfsPriceMap[lcfsSpreadNear],fd=lcfsPriceMap[lcfsSpreadFar];
+                        setLcfsFutBlotter(b=>[...b,{id:Date.now(),time,near:lcfsSpreadNear,far:lcfsSpreadFar,
+                          nearPrice:nd.price,farPrice:fd.price,spread:lcfsSpread.spread,ann:lcfsSpread.ann}]);
+                      }} style={{
+                        background:"#fb923c",border:"none",borderRadius:2,color:"#070b10",
+                        fontFamily:"'IBM Plex Mono',monospace",fontSize:9,fontWeight:700,
+                        letterSpacing:"0.1em",padding:"6px 12px",cursor:"pointer",textTransform:"uppercase",
+                      }}>+ Log Spread</button>
+                    </div>
+                  )}
+                  {/* Blotter */}
+                  {lcfsFutBlotter.length>0&&(
+                    <div>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                        <span style={{fontSize:7,color:"#334155"}}>{lcfsFutBlotter.length} spread{lcfsFutBlotter.length!==1?"s":""} logged</span>
+                        <button onClick={()=>setLcfsFutBlotter([])} style={{fontSize:7,color:"#f87171",background:"transparent",border:"1px solid #f8717133",borderRadius:2,padding:"1px 6px",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace"}}>CLEAR</button>
+                      </div>
+                      {lcfsFutBlotter.map((b,i)=>(
+                        <div key={b.id} className="rh" style={{display:"grid",gridTemplateColumns:"48px 52px 52px 1fr 60px 24px",
+                          gap:"0 5px",alignItems:"center",padding:"4px 4px",borderBottom:"1px solid #0a0e14",
+                          background:i%2===0?"transparent":"rgba(255,255,255,0.01)"}}>
+                          <span style={{fontSize:8,color:"#334155"}}>{b.time}</span>
+                          <span style={{fontSize:9,color:"#34d399",fontVariantNumeric:"tabular-nums"}}>{b.near}</span>
+                          <span style={{fontSize:9,color:"#f87171",fontVariantNumeric:"tabular-nums"}}>{b.far}</span>
+                          <span style={{fontSize:10,fontWeight:600,color:b.spread>=0?"#34d399":"#f87171",fontVariantNumeric:"tabular-nums",textAlign:"right"}}>
+                            {b.spread>=0?"+":""}{b.spread.toFixed(2)}
+                          </span>
+                          <span style={{fontSize:9,color:"#fb923c",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{b.ann.toFixed(2)}%</span>
+                          <button onClick={()=>setLcfsFutBlotter(bl=>bl.filter(x=>x.id!==b.id))}
+                            style={{fontSize:9,color:"#334155",background:"transparent",border:"none",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
+                            onMouseEnter={e=>{e.target.style.color="#f87171";}}
+                            onMouseLeave={e=>{e.target.style.color="#334155";}}>x</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -208,6 +593,26 @@ function wpVega(F, K, T, r, sigmaN, isDaily) {
   const s = isDaily ? sigmaN * WP_VOL_SCALE : sigmaN;
   return bachelierVega(F, K, T, r, s);
 }
+
+
+// ─── LCFS Constants ───────────────────────────────────────────────────────────
+// 72 months from Apr-26 to Mar-32
+const LCFS_MONTHS = (()=>{
+  const months = [];
+  let y=2026, m=3; // Apr-26
+  for(let i=0;i<72;i++){
+    months.push({
+      label:`${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m]}-${String(y).slice(2)}`,
+      month:m, year:y
+    });
+    m++; if(m>11){m=0;y++;}
+  }
+  return months;
+})();
+// LCFS options: quarterly expiries only (Mar/Jun/Sep/Dec) for 12 quarters
+const LCFS_OPT_EXPIRIES = LCFS_MONTHS.filter(c=>[2,5,8,11].includes(c.month)).slice(0,12);
+// Strikes $50-$300 in $5 steps
+const LCFS_STRIKES = Array.from({length:51},(x,i)=>50+i*5);
 
 // ─── West Power Constants ──────────────────────────────────────────────────────
 const WP_HUBS     = ["SP15","NP15","Mid-C","PV"];
@@ -1187,6 +1592,63 @@ function CCADesk({ fbData, syncStatus }) {
 
   // ── ACP state ────────────────────────────────────────────────────────────────
   // Floor price schedule: $27.94 base, +7.5%/yr (5% + 2.5% CPI)
+  // ── LCFS state ────────────────────────────────────────────────────────────────
+  const [lcfsAnchor,setLcfsAnchor]         = useState(()=>lsGet('lcfs_anchor',75.00));
+  const [lcfsAnchorInput,setLcfsAnchorInput] = useState(()=>String(lsGet('lcfs_anchor',75.00)));
+  const [lcfsBaseRate,setLcfsBaseRate]     = useState(()=>lsGet('lcfs_baseRate',4.0));
+  const [lcfsMonthlyRates,setLcfsMonthlyRates] = useState(()=>lsGet('lcfs_monthlyRates',
+    Object.fromEntries(LCFS_MONTHS.map(c=>[c.label,4.0]))
+  ));
+  const [lcfsAtmVol,setLcfsAtmVol]         = useState(()=>lsGet('lcfs_atmVol',0.45));
+  const [lcfsSkew,setLcfsSkew]             = useState(()=>lsGet('lcfs_skew',-0.05));
+  const [lcfsConvexity,setLcfsConvexity]   = useState(()=>lsGet('lcfs_convexity',0.15));
+  const [lcfsPerStrikeAdj,setLcfsPerStrikeAdj] = useState(()=>lsGet('lcfs_perStrikeAdj',
+    Object.fromEntries(LCFS_STRIKES.map(k=>[k,0]))  // 51 strikes $50-$300 in $5 steps
+  ));
+  const [lcfsSelExpiry,setLcfsSelExpiry]   = useState("Dec-26");
+  const [lcfsSpreadNear,setLcfsSpreadNear] = useState("Apr-26");
+  const [lcfsSpreadFar,setLcfsSpreadFar]   = useState("Dec-26");
+  const [lcfsFutBlotter,setLcfsFutBlotter] = useState([]);
+  const [lcfsGreeks,setLcfsGreeks]         = useState(false);
+  const [lcfsShowBidAsk,setLcfsShowBidAsk] = useState(false);
+  const [lcfsMonthlyRatesEditing,setLcfsMonthlyRatesEditing] = useState(false);
+
+  // Build LCFS forward curve
+  const lcfsCurve = useMemo(()=>{
+    const anchorLabel = "Dec-26";
+    const anchorIdx   = LCFS_MONTHS.findIndex(c=>c.label===anchorLabel);
+    return LCFS_MONTHS.map((c,i)=>{
+      const dtMonths = i - anchorIdx;
+      let logCarry = 0;
+      if(dtMonths>=0){
+        for(let j=anchorIdx;j<i;j++){
+          const r = (lcfsMonthlyRates[LCFS_MONTHS[j].label]??lcfsBaseRate)/100;
+          logCarry += r/12;
+        }
+      } else {
+        for(let j=i;j<anchorIdx;j++){
+          const r = (lcfsMonthlyRates[LCFS_MONTHS[j].label]??lcfsBaseRate)/100;
+          logCarry -= r/12;
+        }
+      }
+      return {...c, price: lcfsAnchor*Math.exp(logCarry)};
+    });
+  },[lcfsAnchor,lcfsMonthlyRates,lcfsBaseRate]);
+
+  const lcfsPriceMap = useMemo(()=>{
+    const today=new Date(), map={};
+    lcfsCurve.forEach(c=>{
+      const expDate=new Date(c.year,c.month,15);
+      const T=Math.max((expDate-today)/(365*24*3600*1000),0.003);
+      map[c.label]={price:c.price,T};
+    });
+    return map;
+  },[lcfsCurve]);
+
+  function lcfsStrikeVol(K,F){ return strikeVol(K,F,lcfsAtmVol,lcfsSkew,lcfsConvexity,lcfsPerStrikeAdj[K]||0); }
+  function commitLcfsAnchor(v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) setLcfsAnchor(n); }
+  function setLcfsMonthlyRate(label,val){ setLcfsMonthlyRates(p=>({...p,[label]:val})); }
+
   function wpOptVol(K, F) {
     // Bachelier: absolute vol in $/MWh, linear moneyness (K-F) in $/MWh
     const m = K - F;
@@ -1215,13 +1677,30 @@ function CCADesk({ fbData, syncStatus }) {
         wp_optSkew:       wpOptSkew,
         wp_optConvexity:  wpOptConvexity,
         wp_optPerStrike:  wpOptPerStrike,
+        lcfs_anchor:      lcfsAnchor,
+        lcfs_baseRate:    lcfsBaseRate,
+        lcfs_monthlyRates:lcfsMonthlyRates,
+        lcfs_atmVol:      lcfsAtmVol,
+        lcfs_skew:        lcfsSkew,
+        lcfs_convexity:   lcfsConvexity,
+        lcfs_perStrikeAdj:lcfsPerStrikeAdj,
         _lastUpdated:     Date.now(),
       };
       setDoc(DESK_DOC, payload, {merge:true}).catch(e=>console.error("Firestore write error:",e));
     }, 800);
     return ()=>{ if(syncTimer.current) clearTimeout(syncTimer.current); };
   }, [anchorPrice,quarterRates,baseRate,monthlyRates,atmVol,skew,convexity,
-      perStrikeAdj,wpSP15,wpSpreads,wpOptAtmVol,wpOptSkew,wpOptConvexity,wpOptPerStrike]);
+      perStrikeAdj,wpSP15,wpSpreads,wpOptAtmVol,wpOptSkew,wpOptConvexity,wpOptPerStrike,
+      lcfsAnchor,lcfsBaseRate,lcfsMonthlyRates,lcfsAtmVol,lcfsSkew,lcfsConvexity,lcfsPerStrikeAdj]);
+
+  // ── LCFS localStorage persistence ─────────────────────────────────────────
+  useEffect(()=>{ lsSet('lcfs_anchor',       lcfsAnchor);       }, [lcfsAnchor]);
+  useEffect(()=>{ lsSet('lcfs_baseRate',      lcfsBaseRate);     }, [lcfsBaseRate]);
+  useEffect(()=>{ lsSet('lcfs_monthlyRates',  lcfsMonthlyRates); }, [lcfsMonthlyRates]);
+  useEffect(()=>{ lsSet('lcfs_atmVol',        lcfsAtmVol);       }, [lcfsAtmVol]);
+  useEffect(()=>{ lsSet('lcfs_skew',          lcfsSkew);         }, [lcfsSkew]);
+  useEffect(()=>{ lsSet('lcfs_convexity',     lcfsConvexity);    }, [lcfsConvexity]);
+  useEffect(()=>{ lsSet('lcfs_perStrikeAdj',  lcfsPerStrikeAdj); }, [lcfsPerStrikeAdj]);
 
   // Quarter → month mapping for 2026 curve months
   const QUARTER_MONTHS_2026 = {
@@ -1259,6 +1738,13 @@ function CCADesk({ fbData, syncStatus }) {
     if(fbData.wp_optSkew       !== undefined) setWpOptSkew(fbData.wp_optSkew);
     if(fbData.wp_optConvexity  !== undefined) setWpOptConvexity(fbData.wp_optConvexity);
     if(fbData.wp_optPerStrike  !== undefined) setWpOptPerStrike(fbData.wp_optPerStrike);
+    if(fbData.lcfs_anchor      !== undefined) { setLcfsAnchor(fbData.lcfs_anchor); if(!isEditing.current) setLcfsAnchorInput(String(fbData.lcfs_anchor)); }
+    if(fbData.lcfs_baseRate    !== undefined) setLcfsBaseRate(fbData.lcfs_baseRate);
+    if(fbData.lcfs_monthlyRates!== undefined) setLcfsMonthlyRates(fbData.lcfs_monthlyRates);
+    if(fbData.lcfs_atmVol      !== undefined) setLcfsAtmVol(fbData.lcfs_atmVol);
+    if(fbData.lcfs_skew        !== undefined) setLcfsSkew(fbData.lcfs_skew);
+    if(fbData.lcfs_convexity   !== undefined) setLcfsConvexity(fbData.lcfs_convexity);
+    if(fbData.lcfs_perStrikeAdj!== undefined) setLcfsPerStrikeAdj(fbData.lcfs_perStrikeAdj);
   }, [fbData]);
 
   // Mark editing = true whenever local state changes, reset timer on every call
@@ -1753,6 +2239,7 @@ function CCADesk({ fbData, syncStatus }) {
           {label:"Futures Curve",badge:null},
           {label:"West Power",badge:null},
           {label:"Power Options",badge:null},
+          {label:"LCFS",badge:null},
         ].map(({label,badge},i)=>(
           <button key={label} className={`tab-btn${tab===i?" on":""}`} onClick={()=>setTab(i)}
             style={{position:"relative"}}>
