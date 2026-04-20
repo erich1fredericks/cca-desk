@@ -1242,7 +1242,7 @@ function CCADesk({ fbData, syncStatus }) {
 
   useEffect(()=>{
     if(!fbData || isEditing.current) return;
-    if(fbData.cca_anchorPrice  !== undefined) { setAnchorPrice(fbData.cca_anchorPrice); setPriceInput(String(fbData.cca_anchorPrice)); }
+    if(fbData.cca_anchorPrice  !== undefined) { setAnchorPrice(fbData.cca_anchorPrice); if(!isEditing.current) setPriceInput(String(fbData.cca_anchorPrice)); }
     if(fbData.cca_quarterRates !== undefined) setQuarterRates(fbData.cca_quarterRates);
     if(fbData.cca_baseRate     !== undefined) setBaseRate(fbData.cca_baseRate);
     if(fbData.cca_monthlyRates !== undefined) setMonthlyRates(fbData.cca_monthlyRates);
@@ -1258,11 +1258,11 @@ function CCADesk({ fbData, syncStatus }) {
     if(fbData.wp_optPerStrike  !== undefined) setWpOptPerStrike(fbData.wp_optPerStrike);
   }, [fbData]);
 
-  // Mark editing = true whenever local state changes, clear after 3s of inactivity
+  // Mark editing = true whenever local state changes, reset timer on every call
   function markEditing() {
     isEditing.current = true;
     if(localEditTimer.current) clearTimeout(localEditTimer.current);
-    localEditTimer.current = setTimeout(()=>{ isEditing.current = false; }, 3000);
+    localEditTimer.current = setTimeout(()=>{ isEditing.current = false; }, 5000);
   }
 
   function setQR(i, v) {
@@ -1701,9 +1701,8 @@ function CCADesk({ fbData, syncStatus }) {
           <div style={{display:"flex",alignItems:"flex-end",gap:4}}>
             <span style={{color:"#38bdf8",fontSize:17,lineHeight:1,marginBottom:1}}>$</span>
             <input type="number" step="0.01" value={priceInput}
-              onChange={e=>setPriceInput(e.target.value)}
-              onBlur={e=>commitPrice(e.target.value)}
-              onKeyDown={e=>{if(e.key==="Enter")commitPrice(e.target.value);}}
+              onChange={e=>{ setPriceInput(e.target.value); markEditing(); }}
+              onKeyDown={e=>{ if(e.key==="Enter"){ commitPrice(e.target.value); markEditing(); e.target.blur(); }}}
               style={{background:"transparent",border:"none",borderBottom:"2px solid #38bdf8",color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontSize:24,fontWeight:600,width:86,outline:"none",paddingBottom:1}}
             />
             <span style={{fontSize:7,color:"#2d3d50",marginBottom:2}}>USD/tCO₂e</span>
