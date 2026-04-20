@@ -1235,11 +1235,9 @@ function CCADesk({ fbData, syncStatus }) {
   };
 
   // ── Apply incoming Firestore updates from other users ─────────────────────
-  const isLocalChange = useRef(false);
   useEffect(()=>{
-    if(!fbData || isLocalChange.current) return;
-    // Only update state from remote if value differs (avoid infinite loop)
-    if(fbData.cca_anchorPrice  !== undefined) setAnchorPrice(fbData.cca_anchorPrice);
+    if(!fbData) return;
+    if(fbData.cca_anchorPrice  !== undefined) { setAnchorPrice(fbData.cca_anchorPrice); setPriceInput(String(fbData.cca_anchorPrice)); }
     if(fbData.cca_quarterRates !== undefined) setQuarterRates(fbData.cca_quarterRates);
     if(fbData.cca_baseRate     !== undefined) setBaseRate(fbData.cca_baseRate);
     if(fbData.cca_monthlyRates !== undefined) setMonthlyRates(fbData.cca_monthlyRates);
@@ -1654,13 +1652,18 @@ function CCADesk({ fbData, syncStatus }) {
             CCA Derivatives Pricer
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
-            <div style={{display:"flex",alignItems:"center",gap:5,fontSize:8,letterSpacing:"0.08em",
-              color:syncStatus==="live"?"#34d399":syncStatus==="error"?"#f87171":"#fb923c"}}>
-              <div style={{width:6,height:6,borderRadius:"50%",
+            <div style={{display:"flex",alignItems:"center",gap:5,fontSize:9,letterSpacing:"0.1em",
+              fontFamily:"'IBM Plex Mono',monospace",fontWeight:600,
+              color:syncStatus==="live"?"#34d399":syncStatus==="error"?"#f87171":"#fb923c",
+              background:syncStatus==="live"?"rgba(52,211,153,0.08)":syncStatus==="error"?"rgba(248,113,113,0.08)":"rgba(251,146,60,0.08)",
+              border:`1px solid ${syncStatus==="live"?"#34d39944":syncStatus==="error"?"#f8717144":"#fb923c44"}`,
+              borderRadius:3,padding:"4px 10px",
+            }}>
+              <div style={{width:7,height:7,borderRadius:"50%",
                 background:syncStatus==="live"?"#34d399":syncStatus==="error"?"#f87171":"#fb923c",
-                boxShadow:syncStatus==="live"?"0 0 6px #34d399":"none",
+                boxShadow:syncStatus==="live"?"0 0 8px #34d399":syncStatus==="error"?"0 0 8px #f87171":"none",
               }}/>
-              {syncStatus==="live"?"LIVE":syncStatus==="error"?"SYNC ERR":"…"}
+              {syncStatus==="live"?"LIVE":syncStatus==="error"?"SYNC ERROR":"CONNECTING"}
             </div>
             <button onClick={generateEODReport} style={{
               background:"#0f172a",border:"1px solid #334155",borderRadius:3,
