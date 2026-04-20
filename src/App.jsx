@@ -229,7 +229,7 @@ const LCFS_MONTHS = (()=>{
 // LCFS options: quarterly expiries only (Mar/Jun/Sep/Dec) for 12 quarters
 const LCFS_OPT_EXPIRIES = LCFS_MONTHS.filter(c=>[2,5,8,11].includes(c.month)).slice(0,12);
 // Strikes $50-$300 in $5 steps
-const LCFS_STRIKES = Array.from({length:51},(x,i)=>50+i*5);
+const LCFS_STRIKES = Array.from({length:49},(x,i)=>10+i*5); // $10-$250 in $5 steps
 
 // ─── CCA Vintage Matrix Constants ────────────────────────────────────────────
 // LTD dates keyed by expiry month label — same for all vintages
@@ -3803,147 +3803,118 @@ function CCADesk({ fbData, syncStatus }) {
               </div>
             </div>
 
-            {/* ── Main content: options chain + curve side by side ── */}
+            {/* ── Main content: vol surface + curve side by side ── */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 360px",gap:14,alignItems:"start"}}>
 
-              {/* LEFT: Options chain */}
+              {/* LEFT: Vol surface */}
               <div>
-                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#fb923c",textTransform:"uppercase",marginBottom:6}}>
-                  Options Chain — {lcfsSelExpiry} &nbsp;
-                  <span style={{color:"#334155"}}>F=${lcfsF.toFixed(2)} · T={(lcfsT*365).toFixed(0)}d · ATM={((lcfsAtmVol)*100).toFixed(1)}%</span>
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#fb923c",textTransform:"uppercase",marginBottom:10}}>
+                  Vol Surface — {lcfsSelExpiry} &nbsp;
+                  <span style={{color:"#334155"}}>F=${lcfsF.toFixed(2)} · T={(lcfsT*365).toFixed(0)}d</span>
                 </div>
+
+                {/* Smile chart */}
+                <div className="panel" style={{marginBottom:10}}>
+                  <VolSmileChart
+                    F={lcfsF}
+                    strikes={LCFS_STRIKES}
+                    volFn={lcfsStrikeVol}
+                    color="#fb923c"
+                    label="LCFS Vol Smile"
+                  />
+                </div>
+
+                {/* Strike vol table */}
                 <div style={{overflowX:"auto"}}>
-                  <div style={{minWidth:520}}>
+                  <div style={{minWidth:480}}>
                     {/* Header */}
                     <div style={{
-                      display:"grid",
-                      gridTemplateColumns:lcfsGreeks?"70px 55px 45px 45px 70px 3px 90px 60px 3px 70px 55px 45px 45px 70px":"70px 55px 70px 3px 90px 60px 3px 70px 55px 70px",
+                      display:"grid",gridTemplateColumns:"60px 70px 70px 70px 70px 70px 70px",
                       gap:"0 4px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",
                       padding:"5px 8px",borderBottom:"2px solid #1a2840",
                       position:"sticky",top:0,zIndex:10,background:"#070b10",
                     }}>
-                      {lcfsGreeks&&<><span style={{color:"#93c5fd44",textAlign:"right"}}>Vega</span><span style={{color:"#93c5fd44",textAlign:"right"}}>Θ/d</span><span style={{color:"#93c5fd44",textAlign:"right"}}>Γ</span></>}
-                      <span style={{color:"#93c5fd",textAlign:"right",fontWeight:700}}>{lcfsShowBidAsk?"Bid/Ask":"Call $"}</span>
-                      <div style={{textAlign:"right",lineHeight:1.1}}>
-                        <div style={{fontSize:7,color:"#93c5fd55"}}>Δ</div>
-                        {!lcfsGreeks&&<div style={{fontSize:6,color:"#a78bfa33"}}>Vol</div>}
-                      </div>
-                      {!lcfsGreeks&&<span style={{display:"none"}}/>}
-                      <span/>
-                      <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:6}}>
-                        <span style={{color:"#ffffff99",fontWeight:700}}>Strike</span>
-                        <span style={{color:"#a78bfa44",fontSize:6}}>Vol/Adj</span>
-                      </div>
-                      {!lcfsGreeks&&<span style={{color:"#a78bfa33",textAlign:"center",fontSize:6}}>Adj</span>}
-                      <span/>
-                      <span style={{color:"#fca5a5",textAlign:"left",fontWeight:700}}>{lcfsShowBidAsk?"Bid/Ask":"Put $"}</span>
-                      <div style={{textAlign:"left",lineHeight:1.1}}>
-                        <div style={{fontSize:7,color:"#fca5a544"}}>Δ</div>
-                        {!lcfsGreeks&&<div style={{fontSize:6,color:"#a78bfa33"}}>Vol</div>}
-                      </div>
-                      {lcfsGreeks&&<><span style={{color:"#fca5a533",textAlign:"left"}}>Γ</span><span style={{color:"#fca5a533",textAlign:"left"}}>Θ/d</span><span style={{color:"#fca5a533",textAlign:"left"}}>Vega</span></>}
-                      {!lcfsGreeks&&<span style={{display:"none"}}/>}
+                      <span>Strike</span>
+                      <span style={{textAlign:"right"}}>Vol %</span>
+                      <span style={{textAlign:"right"}}>Adj pp</span>
+                      <span style={{textAlign:"right"}}>Call $</span>
+                      <span style={{textAlign:"right"}}>Put $</span>
+                      <span style={{textAlign:"right"}}>Call Δ</span>
+                      <span style={{textAlign:"right"}}>Put Δ</span>
                     </div>
-
                     {/* Rows */}
                     {lcfsRows.map((row,idx)=>{
                       const isATM=Math.abs(row.K-lcfsF)<2.6;
-                      const isNear=Math.abs(row.K-lcfsF)<12;
+                      const isNear=Math.abs(row.K-lcfsF)<8;
                       const adj=lcfsPerStrikeAdj[row.K]||0;
-                      const halfSp=0.05;
-                      const cBid=row.call*(1-halfSp), cAsk=row.call*(1+halfSp);
-                      const pBid=row.put*(1-halfSp), pAsk=row.put*(1+halfSp);
-                      const fmtP=v=>v<0.01?"—":v.toFixed(2);
                       return (
                         <div key={row.K} className="rh" style={{
-                          display:"grid",
-                          gridTemplateColumns:lcfsGreeks?"70px 55px 45px 45px 70px 3px 90px 60px 3px 70px 55px 45px 45px 70px":"70px 55px 70px 3px 90px 60px 3px 70px 55px 70px",
+                          display:"grid",gridTemplateColumns:"60px 70px 70px 70px 70px 70px 70px",
                           gap:"0 4px",alignItems:"center",padding:isATM?"8px 8px":"4px 8px",
                           borderBottom:"1px solid #0a0e14",
                           background:isATM?"rgba(251,146,60,0.07)":idx%2===0?"#0b0f18":"#090c14",
                           borderLeft:isATM?"3px solid #fb923c":"3px solid transparent",
                         }}>
-                          {lcfsGreeks&&<>
-                            <span style={{fontSize:9,color:"#93c5fd44",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
-                            <span style={{fontSize:9,color:"#93c5fd44",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.cTheta.toFixed(3)}</span>
-                            <span style={{fontSize:9,color:"#93c5fd44",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
-                          </>}
-                          {/* Call */}
-                          {lcfsShowBidAsk?(
-                            <div style={{textAlign:"right",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
-                              <span style={{fontSize:10,fontWeight:600,color:row.call<0.01?"#1e2d3d":"#93c5fd"}}>{fmtP(cBid)}</span>
-                              <span style={{fontSize:9,color:"#334155",margin:"0 2px"}}>/</span>
-                              <span style={{fontSize:10,fontWeight:600,color:row.call<0.01?"#1e2d3d":"#93c5fd"}}>{fmtP(cAsk)}</span>
-                            </div>
-                          ):(
-                            <span style={{fontSize:isATM?14:12,fontWeight:600,color:row.call<0.01?"#1e2d3d":"#93c5fd",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{fmtP(row.call)}</span>
-                          )}
-                          <div style={{textAlign:"right",lineHeight:1.2}}>
-                            <div style={{fontSize:9,color:"#93c5fd66",fontVariantNumeric:"tabular-nums"}}>{row.cDelta.toFixed(2)}</div>
-                            {!lcfsGreeks&&<div style={{fontSize:7,color:"#a78bfa55",fontVariantNumeric:"tabular-nums"}}>{(row.s*100).toFixed(1)}%</div>}
-                          </div>
-                          {!lcfsGreeks&&<span style={{display:"none"}}/>}
-                          {/* Divider */}
-                          <div style={{width:1,background:isATM?"#fb923c44":"#182030",alignSelf:"stretch"}}/>
                           {/* Strike */}
-                          <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:5}}>
-                            <span style={{fontSize:isATM?15:12,fontWeight:700,color:"#ffffff",fontVariantNumeric:"tabular-nums"}}>{row.K}</span>
-                            {isATM&&<span style={{fontSize:7,color:"#fb923c"}}>●</span>}
+                          <div style={{fontSize:isATM?14:12,fontWeight:isATM?700:500,
+                            color:"#ffffff",fontVariantNumeric:"tabular-nums"}}>
+                            {row.K}
+                            {isATM&&<span style={{fontSize:7,color:"#fb923c",marginLeft:3}}>●</span>}
                           </div>
-                          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
-                            <span style={{fontSize:8,color:"#a78bfa"}}>{(row.s*100).toFixed(1)}%</span>
+                          {/* Vol */}
+                          <div style={{textAlign:"right",fontSize:isATM?13:11,fontWeight:isATM?700:500,
+                            color:isATM?"#fb923c":"#a78bfa",fontVariantNumeric:"tabular-nums"}}>
+                            {(row.s*100).toFixed(2)}%
+                          </div>
+                          {/* Adj input */}
+                          <div style={{textAlign:"right"}}>
                             <input className="vadj" type="number" step="0.5" value={adj}
-                              onChange={e=>setLcfsPerStrikeAdj(p=>({...p,[row.K]:parseFloat(e.target.value)||0}))}/>
+                              onChange={e=>setLcfsPerStrikeAdj(p=>({...p,[row.K]:parseFloat(e.target.value)||0}))}
+                              style={{width:52,textAlign:"right"}}/>
                           </div>
-                          {/* Divider */}
-                          <div style={{width:1,background:isATM?"#fb923c44":"#182030",alignSelf:"stretch"}}/>
+                          {/* Call */}
+                          <div style={{textAlign:"right",fontSize:isATM?13:11,fontWeight:isATM?600:400,
+                            color:row.call<0.01?"#1e2d3d":"#93c5fd",fontVariantNumeric:"tabular-nums"}}>
+                            {row.call<0.01?"—":row.call.toFixed(2)}
+                          </div>
                           {/* Put */}
-                          {lcfsShowBidAsk?(
-                            <div style={{textAlign:"left",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
-                              <span style={{fontSize:10,fontWeight:600,color:row.put<0.01?"#1e2d3d":"#fca5a5"}}>{fmtP(pBid)}</span>
-                              <span style={{fontSize:9,color:"#334155",margin:"0 2px"}}>/</span>
-                              <span style={{fontSize:10,fontWeight:600,color:row.put<0.01?"#1e2d3d":"#fca5a5"}}>{fmtP(pAsk)}</span>
-                            </div>
-                          ):(
-                            <span style={{fontSize:isATM?14:12,fontWeight:600,color:row.put<0.01?"#1e2d3d":"#fca5a5",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{fmtP(row.put)}</span>
-                          )}
-                          <div style={{textAlign:"left",lineHeight:1.2}}>
-                            <div style={{fontSize:9,color:"#fca5a566",fontVariantNumeric:"tabular-nums"}}>{row.pDelta.toFixed(2)}</div>
-                            {!lcfsGreeks&&<div style={{fontSize:7,color:"#fca5a533",fontVariantNumeric:"tabular-nums"}}>{(row.s*100).toFixed(1)}%</div>}
+                          <div style={{textAlign:"right",fontSize:isATM?13:11,fontWeight:isATM?600:400,
+                            color:row.put<0.01?"#1e2d3d":"#fca5a5",fontVariantNumeric:"tabular-nums"}}>
+                            {row.put<0.01?"—":row.put.toFixed(2)}
                           </div>
-                          {lcfsGreeks&&<>
-                            <span style={{fontSize:9,color:"#fca5a533",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{row.gamma.toFixed(4)}</span>
-                            <span style={{fontSize:9,color:"#fca5a533",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{row.pTheta.toFixed(3)}</span>
-                            <span style={{fontSize:9,color:"#fca5a533",textAlign:"left",fontVariantNumeric:"tabular-nums"}}>{row.vega.toFixed(3)}</span>
-                          </>}
-                          {!lcfsGreeks&&<span style={{display:"none"}}/>}
+                          {/* Call delta */}
+                          <div style={{textAlign:"right",fontSize:10,color:"#93c5fd66",fontVariantNumeric:"tabular-nums"}}>
+                            {row.cDelta.toFixed(2)}
+                          </div>
+                          {/* Put delta */}
+                          <div style={{textAlign:"right",fontSize:10,color:"#fca5a566",fontVariantNumeric:"tabular-nums"}}>
+                            {row.pDelta.toFixed(2)}
+                          </div>
                         </div>
                       );
                     })}
                   </div>
                 </div>
                 <div style={{marginTop:8,fontSize:8,color:"#182030"}}>
-                  LCFS CCF — BS Futures Options · Strikes $50–$300 · $5 increments · 100 credits/contract
+                  LCFS CCF — BS Futures Options · Strikes $10–$250 · $5 increments · 100 credits/contract
                 </div>
-              </div>
-
               {/* RIGHT: Futures curve + spread calc */}
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
 
                 {/* Futures curve */}
                 <div className="panel">
-                  <div style={{fontSize:8,letterSpacing:"0.14em",color:"#fb923c",textTransform:"uppercase",marginBottom:8}}>
-                    Futures Curve — 72 Months
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,fontSize:8,color:"#334155"}}>
-                    <span>Base rate</span>
-                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+                    <div style={{fontSize:8,letterSpacing:"0.14em",color:"#fb923c",textTransform:"uppercase"}}>
+                      Futures Curve — 72 Months
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:8,color:"#334155"}}>Base rate</span>
                       <input type="number" step="0.05" value={lcfsBaseRate.toFixed(2)}
                         onChange={e=>setLcfsBaseRate(parseFloat(e.target.value)||0)}
-                        style={{width:52,background:"#070b10",border:"1px solid #64748b44",color:"#64748b",
-                          fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,
-                          padding:"2px 4px",textAlign:"center",outline:"none",borderRadius:2}}/>
-                      <span style={{color:"#64748b"}}>%/yr</span>
+                        style={{width:52,background:"#070b10",border:"1px solid #fb923c44",color:"#fb923c",
+                          fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:700,
+                          padding:"2px 5px",textAlign:"center",outline:"none",borderRadius:2}}/>
+                      <span style={{color:"#fb923c",fontSize:10}}>%/yr</span>
                     </div>
                   </div>
                   <div style={{maxHeight:380,overflowY:"auto"}}>
