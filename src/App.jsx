@@ -1194,6 +1194,7 @@ function CCADesk({ fbData, syncStatus }) {
   // ── Sync all pricing state to Firestore (debounced 800ms) ────────────────
   const syncTimer = useRef(null);
   useEffect(()=>{
+    markEditing(); // block incoming Firebase echo while we're editing
     if(syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(()=>{
       const payload = {
@@ -1234,9 +1235,13 @@ function CCADesk({ fbData, syncStatus }) {
     3: ["Oct","Nov","Dec"],
   };
 
-  // ── Apply incoming Firestore updates from other users ─────────────────────
+  // ── Apply incoming Firestore updates — only from OTHER users ─────────────
+  // Track when we're mid-edit so we don't let Firebase overwrite local input
+  const localEditTimer = useRef(null);
+  const isEditing = useRef(false);
+
   useEffect(()=>{
-    if(!fbData) return;
+    if(!fbData || isEditing.current) return;
     if(fbData.cca_anchorPrice  !== undefined) { setAnchorPrice(fbData.cca_anchorPrice); setPriceInput(String(fbData.cca_anchorPrice)); }
     if(fbData.cca_quarterRates !== undefined) setQuarterRates(fbData.cca_quarterRates);
     if(fbData.cca_baseRate     !== undefined) setBaseRate(fbData.cca_baseRate);
@@ -1252,6 +1257,13 @@ function CCADesk({ fbData, syncStatus }) {
     if(fbData.wp_optConvexity  !== undefined) setWpOptConvexity(fbData.wp_optConvexity);
     if(fbData.wp_optPerStrike  !== undefined) setWpOptPerStrike(fbData.wp_optPerStrike);
   }, [fbData]);
+
+  // Mark editing = true whenever local state changes, clear after 3s of inactivity
+  function markEditing() {
+    isEditing.current = true;
+    if(localEditTimer.current) clearTimeout(localEditTimer.current);
+    localEditTimer.current = setTimeout(()=>{ isEditing.current = false; }, 3000);
+  }
 
   function setQR(i, v) {
     setQuarterRates(p => p.map((r, j) => j === i ? v : r));
