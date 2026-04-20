@@ -3898,6 +3898,8 @@ function CCADesk({ fbData, syncStatus }) {
                 <div style={{marginTop:8,fontSize:8,color:"#182030"}}>
                   LCFS CCF — BS Futures Options · Strikes $10–$250 · $5 increments · 100 credits/contract
                 </div>
+              </div>
+
               {/* RIGHT: Futures curve + spread calc */}
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
 
@@ -4045,8 +4047,9 @@ function CCADesk({ fbData, syncStatus }) {
               </div>
             </div>
           </div>
+        </div>
         );
-      })()}
+      })()} 
 
       {/* ════════════ RGGI TAB ════════════ */}
       {tab===8 && (
