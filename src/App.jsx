@@ -98,6 +98,7 @@ function PasswordGate({ onUnlock }) {
         </div>
       </div>
 
+
     </div>
   );
 }
@@ -298,6 +299,60 @@ const CCA_VINTAGES = [
 ];
 // Dec anchor year per vintage row (for isRowAnchor highlight)
 const CCA_ROW_DEC_YEAR = {v24:2026,v25:2026,v26:2026,v27:2027,v28:2028};
+
+
+// ─── RGGI Vintage Matrix Constants ───────────────────────────────────────────
+// Exact LTD dates from ICE — keyed by expiry label (same for all vintages)
+const RGGI_LTD = {
+  "Mar-26":new Date("2026-03-26"),"Apr-26":new Date("2026-04-27"),
+  "May-26":new Date("2026-05-26"),"Jun-26":new Date("2026-06-25"),
+  "Jul-26":new Date("2026-07-28"),"Aug-26":new Date("2026-08-26"),
+  "Sep-26":new Date("2026-09-25"),"Oct-26":new Date("2026-10-27"),
+  "Nov-26":new Date("2026-11-24"),"Dec-26":new Date("2026-12-24"),
+  "Jan-27":new Date("2027-01-26"),"Mar-27":new Date("2027-03-25"),
+  "Jun-27":new Date("2027-06-25"),"Sep-27":new Date("2027-09-27"),
+  "Dec-27":new Date("2027-12-27"),
+  "Jan-28":new Date("2028-01-26"),"Feb-28":new Date("2028-02-24"),
+  "Mar-28":new Date("2028-03-28"),"Apr-28":new Date("2028-04-25"),
+  "May-28":new Date("2028-05-25"),"Jun-28":new Date("2028-06-27"),
+  "Jul-28":new Date("2028-07-26"),"Aug-28":new Date("2028-08-28"),
+  "Sep-28":new Date("2028-09-26"),"Oct-28":new Date("2028-10-26"),
+  "Nov-28":new Date("2028-11-27"),"Dec-28":new Date("2028-12-22"),
+};
+function getRGGILTD(label,month,year){
+  return RGGI_LTD[label]||approxLTD(year,month);
+}
+// RGGI listed contracts (sparse in 2027 — only Jan/Mar/Jun/Sep/Dec)
+const RGGI_MATRIX_EXPIRIES = (()=>{
+  const listed = [
+    // 2026: all months Apr-Dec
+    ...["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m,i)=>({
+      label:`${m}-26`,month:[3,4,5,6,7,8,9,10,11][i],year:2026,
+      isDecember:[3,4,5,6,7,8,9,10,11][i]===11,
+      isQuarterly:[2,5,8,11].includes([3,4,5,6,7,8,9,10,11][i]),
+    })),
+    // 2027: sparse — Jan,Mar,Jun,Sep,Dec only
+    {label:"Jan-27",month:0,year:2027,isDecember:false,isQuarterly:false},
+    {label:"Mar-27",month:2,year:2027,isDecember:false,isQuarterly:true},
+    {label:"Jun-27",month:5,year:2027,isDecember:false,isQuarterly:true},
+    {label:"Sep-27",month:8,year:2027,isDecember:false,isQuarterly:true},
+    {label:"Dec-27",month:11,year:2027,isDecember:true,isQuarterly:true},
+    // 2028: all months Jan-Dec
+    ...["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m,i)=>({
+      label:`${m}-28`,month:i,year:2028,
+      isDecember:i===11,isQuarterly:[2,5,8,11].includes(i),
+    })),
+  ];
+  return listed.map(e=>({...e,ltd:getRGGILTD(e.label,e.month,e.year)}));
+})();
+const RGGI_VINTAGES = [
+  {key:"v24",label:"RJ4",vintage:2024,color:"#64748b"},
+  {key:"v25",label:"RJ5",vintage:2025,color:"#7dd3fc"},
+  {key:"v26",label:"RJ6",vintage:2026,color:"#06b6d4",isAnchor:true},
+  {key:"v27",label:"RJ7",vintage:2027,color:"#22d3ee"},
+  {key:"v28",label:"RJ8",vintage:2028,color:"#67e8f9"},
+];
+const RGGI_ROW_DEC_YEAR = {v24:2026,v25:2026,v26:2026,v27:2027,v28:2028};
 
 // ─── West Power Constants ──────────────────────────────────────────────────────
 const WP_HUBS     = ["SP15","NP15","Mid-C","PV"];
@@ -1338,6 +1393,14 @@ function CCADesk({ fbData, syncStatus }) {
   function commitLcfsAnchor(v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) setLcfsAnchor(n); }
   function setLcfsMonthlyRate(label,val){ setLcfsMonthlyRates(p=>({...p,[label]:val})); }
 
+  // ── RGGI state ───────────────────────────────────────────────────────────────
+  const [rggiAnchor,setRggiAnchor]         = useState(()=>lsGet('rggi_anchor',15.00));
+  const [rggiAnchorInput,setRggiAnchorInput] = useState(()=>String(lsGet('rggi_anchor',15.00)));
+  const [rggiBaseRate,setRggiBaseRate]     = useState(()=>lsGet('rggi_baseRate',4.0));
+  const [rggiVintageSpreads,setRggiVintageSpreads] = useState(()=>lsGet('rggi_vintageSpreads',{v24:-0.25,v25:-0.10,v27:0.00,v28:0.00}));
+  function setRggiVintageSpread(v,val){ setRggiVintageSpreads(p=>({...p,[v]:val})); }
+  function commitRggiAnchor(v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) setRggiAnchor(n); }
+
   function wpOptVol(K, F) {
     // Bachelier: absolute vol in $/MWh, linear moneyness (K-F) in $/MWh
     const m = K - F;
@@ -1367,6 +1430,9 @@ function CCADesk({ fbData, syncStatus }) {
         wp_optSkew:       wpOptSkew,
         wp_optConvexity:  wpOptConvexity,
         wp_optPerStrike:  wpOptPerStrike,
+        rggi_anchor:      rggiAnchor,
+        rggi_baseRate:    rggiBaseRate,
+        rggi_vintageSpreads: rggiVintageSpreads,
         lcfs_anchor:      lcfsAnchor,
         lcfs_baseRate:    lcfsBaseRate,
         lcfs_monthlyRates:lcfsMonthlyRates,
@@ -1382,9 +1448,13 @@ function CCADesk({ fbData, syncStatus }) {
   }, [anchorPrice,quarterRates,baseRate,monthlyRates,atmVol,skew,convexity,
       perStrikeAdj,wpSP15,wpSpreads,wpOptAtmVol,wpOptSkew,wpOptConvexity,wpOptPerStrike,
       vintageSpreads,
+      rggiAnchor,rggiBaseRate,rggiVintageSpreads,
       lcfsAnchor,lcfsBaseRate,lcfsMonthlyRates,lcfsAtmVol,lcfsSkew,lcfsConvexity,lcfsPerStrikeAdj]);
 
   // ── LCFS localStorage persistence ─────────────────────────────────────────
+  useEffect(()=>{ lsSet('rggi_anchor',        rggiAnchor);          }, [rggiAnchor]);
+  useEffect(()=>{ lsSet('rggi_baseRate',      rggiBaseRate);        }, [rggiBaseRate]);
+  useEffect(()=>{ lsSet('rggi_vintageSpreads',rggiVintageSpreads);  }, [rggiVintageSpreads]);
   useEffect(()=>{ lsSet('lcfs_anchor',       lcfsAnchor);       }, [lcfsAnchor]);
   useEffect(()=>{ lsSet('lcfs_baseRate',      lcfsBaseRate);     }, [lcfsBaseRate]);
   useEffect(()=>{ lsSet('lcfs_monthlyRates',  lcfsMonthlyRates); }, [lcfsMonthlyRates]);
@@ -1430,6 +1500,9 @@ function CCADesk({ fbData, syncStatus }) {
     if(fbData.wp_optSkew       !== undefined) setWpOptSkew(fbData.wp_optSkew);
     if(fbData.wp_optConvexity  !== undefined) setWpOptConvexity(fbData.wp_optConvexity);
     if(fbData.wp_optPerStrike  !== undefined) setWpOptPerStrike(fbData.wp_optPerStrike);
+    if(fbData.rggi_anchor         !== undefined) { setRggiAnchor(fbData.rggi_anchor); if(!isEditing.current) setRggiAnchorInput(String(fbData.rggi_anchor)); }
+    if(fbData.rggi_baseRate       !== undefined) setRggiBaseRate(fbData.rggi_baseRate);
+    if(fbData.rggi_vintageSpreads !== undefined) setRggiVintageSpreads(fbData.rggi_vintageSpreads);
     if(fbData.lcfs_anchor      !== undefined) { setLcfsAnchor(fbData.lcfs_anchor); if(!isEditing.current) setLcfsAnchorInput(String(fbData.lcfs_anchor)); }
     if(fbData.lcfs_baseRate    !== undefined) setLcfsBaseRate(fbData.lcfs_baseRate);
     if(fbData.lcfs_monthlyRates!== undefined) setLcfsMonthlyRates(fbData.lcfs_monthlyRates);
@@ -1517,6 +1590,30 @@ function CCADesk({ fbData, syncStatus }) {
     }
     return map;
   },[curve]);
+
+  // ── RGGI Vintage Matrix ──────────────────────────────────────────────────────
+  const rggiMatrix = useMemo(()=>{
+    const r = rggiBaseRate/100;
+    const today = new Date(); today.setHours(0,0,0,0);
+    return RGGI_VINTAGES.map(v=>{
+      const rowAnchorPx = v.isAnchor ? rggiAnchor : rggiAnchor + (rggiVintageSpreads[v.key]||0);
+      return {
+        ...v,
+        anchorPx: rowAnchorPx,
+        cells: RGGI_MATRIX_EXPIRIES.map(e=>{
+          const dtMonths = (e.year-2026)*12 + (e.month-11);
+          const px = rowAnchorPx * Math.exp(r * dtMonths/12);
+          const ltd = new Date(e.ltd); ltd.setHours(0,0,0,0);
+          return {
+            expiry:e, price:px,
+            isRowAnchor: e.month===11 && e.year===RGGI_ROW_DEC_YEAR[v.key],
+            isExpired: today > ltd,
+            daysToLTD: Math.round((ltd-today)/(24*3600*1000)),
+          };
+        }),
+      };
+    });
+  },[rggiAnchor,rggiBaseRate,rggiVintageSpreads]);
 
   // ── CCA Vintage Matrix ────────────────────────────────────────────────────
   const vintageMatrix = useMemo(()=>{
@@ -1898,52 +1995,60 @@ function CCADesk({ fbData, syncStatus }) {
         </div>
       </div>
 
-      {/* ── Global controls row */}
-      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"stretch"}}>
+      {/* ── Global controls row — anchor prices only */}
+      <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"stretch"}}>
 
-        {/* Anchor price */}
+        {/* CCA anchor */}
         <div className="panel" style={{minWidth:170}}>
-          <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:7}}>Dec-26 Anchor Price</div>
+          <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:7}}>
+            CCA Dec-26 CB6
+          </div>
           <div style={{display:"flex",alignItems:"flex-end",gap:4}}>
             <span style={{color:"#38bdf8",fontSize:17,lineHeight:1,marginBottom:1}}>$</span>
             <input type="number" step="0.01" value={priceInput}
               onChange={e=>{ setPriceInput(e.target.value); markEditing(); }}
               onKeyDown={e=>{ if(e.key==="Enter"){ commitPrice(e.target.value); markEditing(); e.target.blur(); }}}
-              style={{background:"transparent",border:"none",borderBottom:"2px solid #38bdf8",color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontSize:24,fontWeight:600,width:86,outline:"none",paddingBottom:1}}
-            />
-            <span style={{fontSize:7,color:"#2d3d50",marginBottom:2}}>USD/tCO₂e</span>
+              style={{background:"transparent",border:"none",borderBottom:"2px solid #38bdf8",color:"#38bdf8",
+                fontFamily:"'IBM Plex Mono',monospace",fontSize:24,fontWeight:600,width:86,outline:"none",paddingBottom:1}}/>
+            <span style={{fontSize:7,color:"#2d3d50",marginBottom:2}}>USD/t</span>
           </div>
+          <div style={{fontSize:7,color:"#1e2d3d",marginTop:4}}>Press Enter to commit</div>
         </div>
 
-        {/* Quarterly rates */}
-        <div className="panel" style={{flex:1,minWidth:300}}>
-          <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:9}}>2026 Quarterly Carry Rates</div>
-          <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-start"}}>
-            {quarterRates.map((rate,qi)=>(
-              <RateInput key={qi} value={rate} onChange={v=>setQR(qi,v)} color={Q_COLORS[qi]} label={Q_SHORT[qi]}/>
-            ))}
-            <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"0 2px"}}/>
-            <RateInput value={baseRate} onChange={setBaseRateAndCascade} color="#64748b" label="2027+"/>
+        {/* RGGI anchor */}
+        <div className="panel" style={{minWidth:170}}>
+          <div style={{fontSize:8,letterSpacing:"0.14em",color:"#06b6d4",textTransform:"uppercase",marginBottom:7}}>
+            RGGI Dec-26 RJ6
           </div>
+          <div style={{display:"flex",alignItems:"flex-end",gap:4}}>
+            <span style={{color:"#06b6d4",fontSize:17,lineHeight:1,marginBottom:1}}>$</span>
+            <input type="number" step="0.01" value={rggiAnchorInput}
+              onChange={e=>{{ setRggiAnchorInput(e.target.value); markEditing(); }}}
+              onKeyDown={e=>{{ if(e.key==="Enter"){{ commitRggiAnchor(e.target.value); markEditing(); e.target.blur(); }} }}}
+              style={{background:"transparent",border:"none",borderBottom:"2px solid #06b6d4",color:"#06b6d4",
+                fontFamily:"'IBM Plex Mono',monospace",fontSize:24,fontWeight:600,width:86,outline:"none",paddingBottom:1}}/>
+            <span style={{fontSize:7,color:"#2d3d50",marginBottom:2}}>USD/t</span>
+          </div>
+          <div style={{fontSize:7,color:"#1e2d3d",marginTop:4}}>Press Enter to commit</div>
         </div>
 
-        {/* Quarterly prices quick-ref */}
-        <div className="panel" style={{minWidth:200}}>
-          <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:8}}>Quarterly Futures</div>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {OPTIONS_EXPIRIES.map(e=>{
-              const key=`${MONTHS[e.month].slice(0,3)}-${String(e.year).slice(2)}`;
-              const cp=expiryPriceMap[key];
-              const isSel=selectedExpiry===key;
-              return (
-                <div key={key} onClick={()=>setSelectedExpiry(key)} style={{cursor:"pointer",opacity:isSel?1:0.45,transition:"opacity 0.15s"}}>
-                  <div style={{fontSize:7,color:isSel?"#38bdf8":"#475569",letterSpacing:"0.08em"}}>{key}</div>
-                  <div style={{fontSize:12,fontWeight:600,color:isSel?"#38bdf8":"#94a3b8"}}>${cp?.price.toFixed(2)??"-"}</div>
-                </div>
-              );
-            })}
+        {/* LCFS anchor */}
+        <div className="panel" style={{minWidth:170}}>
+          <div style={{fontSize:8,letterSpacing:"0.14em",color:"#fb923c",textTransform:"uppercase",marginBottom:7}}>
+            LCFS Dec-26 CCF
           </div>
+          <div style={{display:"flex",alignItems:"flex-end",gap:4}}>
+            <span style={{color:"#fb923c",fontSize:17,lineHeight:1,marginBottom:1}}>$</span>
+            <input type="number" step="0.25" value={lcfsAnchorInput}
+              onChange={e=>{ setLcfsAnchorInput(e.target.value); markEditing(); }}
+              onKeyDown={e=>{ if(e.key==="Enter"){ commitLcfsAnchor(e.target.value); markEditing(); e.target.blur(); }}}
+              style={{background:"transparent",border:"none",borderBottom:"2px solid #fb923c",color:"#fb923c",
+                fontFamily:"'IBM Plex Mono',monospace",fontSize:24,fontWeight:600,width:86,outline:"none",paddingBottom:1}}/>
+            <span style={{fontSize:7,color:"#2d3d50",marginBottom:2}}>USD/t</span>
+          </div>
+          <div style={{fontSize:7,color:"#1e2d3d",marginTop:4}}>Press Enter to commit</div>
         </div>
+
       </div>
 
       {/* ── Tab bar */}
@@ -1957,6 +2062,7 @@ function CCADesk({ fbData, syncStatus }) {
           {label:"West Power",badge:null},
           {label:"Power Options",badge:null},
           {label:"LCFS",badge:null},
+          {label:"RGGI",badge:null},
         ].map(({label,badge},i)=>(
           <button key={label} className={`tab-btn${tab===i?" on":""}`} onClick={()=>setTab(i)}
             style={{position:"relative"}}>
@@ -3970,6 +4076,225 @@ function CCADesk({ fbData, syncStatus }) {
           </div>
         );
       })()}
+
+      {/* ════════════ RGGI TAB ════════════ */}
+      {tab===8 && (
+        <div>
+          <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"stretch"}}>
+            {/* Anchor */}
+            <div className="panel" style={{minWidth:170}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:7}}>Dec-26 RJ6 Anchor</div>
+              <div style={{display:"flex",alignItems:"flex-end",gap:4}}>
+                <span style={{color:"#06b6d4",fontSize:17,lineHeight:1,marginBottom:1}}>$</span>
+                <input type="number" step="0.01" value={rggiAnchorInput}
+                  onChange={e=>{setRggiAnchorInput(e.target.value);markEditing();}}
+                  onKeyDown={e=>{if(e.key==="Enter"){commitRggiAnchor(e.target.value);markEditing();e.target.blur();}}}
+                  style={{background:"transparent",border:"none",borderBottom:"2px solid #06b6d4",color:"#06b6d4",
+                    fontFamily:"'IBM Plex Mono',monospace",fontSize:26,fontWeight:700,width:100,outline:"none",paddingBottom:1}}/>
+              </div>
+              <div style={{fontSize:8,color:"#334155",marginTop:4}}>RJ6 v26 · Press Enter</div>
+            </div>
+            {/* Base rate */}
+            <div className="panel" style={{minWidth:150}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:7}}>Base Carry Rate</div>
+              <div style={{display:"flex",alignItems:"flex-end",gap:4}}>
+                <input type="number" step="0.05" value={rggiBaseRate.toFixed(2)}
+                  onChange={e=>setRggiBaseRate(parseFloat(e.target.value)||0)}
+                  style={{background:"transparent",border:"none",borderBottom:"2px solid #64748b",color:"#64748b",
+                    fontFamily:"'IBM Plex Mono',monospace",fontSize:26,fontWeight:700,width:70,outline:"none",paddingBottom:1}}/>
+                <span style={{color:"#64748b",fontSize:13,marginBottom:3}}>%/yr</span>
+              </div>
+              <div style={{fontSize:8,color:"#334155",marginTop:4}}>shared all vintages</div>
+            </div>
+            {/* Vintage spreads */}
+            <div className="panel" style={{flex:1,minWidth:400}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                Vintage Spreads vs Dec-26 RJ6 ($/allowance)
+              </div>
+              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                {RGGI_VINTAGES.filter(v=>!v.isAnchor).map(v=>(
+                  <div key={v.key}>
+                    <div style={{fontSize:8,color:v.color,marginBottom:4,fontWeight:600}}>
+                      {v.label}
+                      <span style={{color:"#334155",fontWeight:400,marginLeft:4}}>
+                        {v.key==="v24"||v.key==="v25"?"Dec-26":v.key==="v27"?"Dec-27":"Dec-28"}
+                      </span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:3}}>
+                      <button onClick={()=>setRggiVintageSpread(v.key,parseFloat(((rggiVintageSpreads[v.key]||0)-0.01).toFixed(3)))}
+                        style={{width:18,height:18,background:"#182030",border:"none",color:"#475569",cursor:"pointer",borderRadius:1,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                      <input type="number" step="0.01"
+                        value={(rggiVintageSpreads[v.key]||0).toFixed(2)}
+                        onChange={e=>setRggiVintageSpread(v.key,parseFloat(e.target.value)||0)}
+                        style={{width:64,background:"#070b10",border:`1px solid ${v.color}44`,
+                          color:v.color,fontFamily:"'IBM Plex Mono',monospace",fontSize:14,
+                          fontWeight:700,padding:"3px 5px",textAlign:"center",outline:"none",borderRadius:2}}/>
+                      <button onClick={()=>setRggiVintageSpread(v.key,parseFloat(((rggiVintageSpreads[v.key]||0)+0.01).toFixed(3)))}
+                        style={{width:18,height:18,background:"#182030",border:"none",color:"#475569",cursor:"pointer",borderRadius:1,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Matrix */}
+          <div style={{overflowX:"auto"}}>
+            <div style={{minWidth:"max-content"}}>
+              {/* Year headers */}
+              <div style={{display:"flex",gap:1,marginBottom:0,paddingLeft:100}}>
+                {[2026,2027,2028].map(yr=>{
+                  const count=RGGI_MATRIX_EXPIRIES.filter(e=>e.year===yr).length;
+                  return (
+                    <div key={yr} style={{
+                      width:count*62+(count-1),flexShrink:0,textAlign:"center",
+                      padding:"3px 4px",marginRight:1,
+                      background:yr===2026?"rgba(6,182,212,0.04)":yr===2027?"rgba(34,211,238,0.03)":"rgba(103,232,249,0.03)",
+                      borderBottom:"1px solid #182030",
+                      fontSize:9,fontWeight:700,letterSpacing:"0.1em",
+                      color:yr===2026?"#06b6d444":yr===2027?"#22d3ee44":"#67e8f944",
+                    }}>{yr}</div>
+                  );
+                })}
+                <div style={{width:79,flexShrink:0}}/>
+              </div>
+              {/* Month headers */}
+              <div style={{display:"flex",gap:1,marginBottom:1,paddingLeft:100}}>
+                {RGGI_MATRIX_EXPIRIES.map(e=>{
+                  const today=new Date();today.setHours(0,0,0,0);
+                  const ltd=new Date(e.ltd);ltd.setHours(0,0,0,0);
+                  const isExpired=today>ltd;
+                  const daysToLTD=Math.round((ltd-today)/(24*3600*1000));
+                  const isNear=!isExpired&&daysToLTD<=5;
+                  return (
+                    <div key={e.label} style={{
+                      width:62,flexShrink:0,textAlign:"center",padding:"4px 2px",
+                      background:isExpired?"#060809":isNear?"rgba(251,146,60,0.07)":e.isDecember?"rgba(6,182,212,0.07)":e.isQuarterly?"rgba(6,182,212,0.03)":"#0b0f18",
+                      borderRadius:"2px 2px 0 0",
+                      borderBottom:`2px solid ${isExpired?"#0f1318":isNear?"#fb923c88":e.isDecember?"#06b6d466":e.isQuarterly?"#06b6d422":"#182030"}`,
+                      opacity:isExpired?0.3:1,
+                    }}>
+                      <div style={{fontSize:9,fontWeight:e.isDecember?700:e.isQuarterly?600:400,
+                        color:isExpired?"#1e2d3d":isNear?"#fb923c":e.isDecember?"#06b6d4":e.isQuarterly?"#06b6d488":"#334155",
+                        fontFamily:"'IBM Plex Mono',monospace"}}>
+                        {e.label.slice(0,3)}
+                      </div>
+                      <div style={{fontSize:6,marginTop:1,color:isExpired?"#0f1318":isNear?"#fb923c88":"#1e2d3d"}}>
+                        {isExpired?"exp":isNear?`LTD ${daysToLTD===0?"today":`${daysToLTD}d`}`:`${Math.round((ltd-today)/(24*3600*1000))}d`}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{width:79,flexShrink:0,textAlign:"center",padding:"4px 2px",background:"#0b0f18",borderRadius:"2px 2px 0 0",borderBottom:"2px solid #182030"}}>
+                  <div style={{fontSize:8,color:"#334155"}}>vs RJ6</div>
+                </div>
+              </div>
+              {/* Vintage rows */}
+              {rggiMatrix.map((v)=>(
+                <div key={v.key} style={{display:"flex",gap:1,marginBottom:1}}>
+                  <div style={{
+                    width:98,flexShrink:0,display:"flex",flexDirection:"column",justifyContent:"center",
+                    padding:"6px 8px",
+                    background:v.isAnchor?"rgba(6,182,212,0.06)":"#0b0f18",
+                    borderRadius:"2px 0 0 2px",
+                    borderLeft:`3px solid ${v.isAnchor?v.color:v.color+"44"}`,
+                  }}>
+                    <div style={{fontSize:13,fontWeight:700,color:v.color,fontFamily:"'IBM Plex Mono',monospace"}}>{v.label}</div>
+                    <div style={{fontSize:7,color:v.isAnchor?"#06b6d488":"#334155",marginTop:1}}>
+                      v{v.vintage}{v.isAnchor?" ■":""}
+                    </div>
+                  </div>
+                  {v.cells.map((cell,ci)=>{
+                    const e=cell.expiry;
+                    const rj6px=rggiMatrix.find(r=>r.key==="v26").cells[ci].price;
+                    const vsRJ6=!v.isAnchor?cell.price-rj6px:null;
+                    const isNearExpiry=!cell.isExpired&&cell.daysToLTD>=0&&cell.daysToLTD<=5;
+                    return (
+                      <div key={e.label} style={{
+                        width:62,flexShrink:0,padding:"5px 2px",textAlign:"center",
+                        background:cell.isExpired?"#060809":cell.isRowAnchor?`${v.color}14`:isNearExpiry?"rgba(251,146,60,0.06)":e.isDecember?"rgba(6,182,212,0.03)":"#0b0f18",
+                        border:cell.isRowAnchor?`1px solid ${v.color}55`:isNearExpiry?"1px solid #fb923c33":"1px solid transparent",
+                        borderRadius:cell.isRowAnchor||isNearExpiry?2:0,
+                        borderBottom:"1px solid #0a0e14",
+                        opacity:cell.isExpired?0.25:1,
+                      }}>
+                        {cell.isExpired?(
+                          <div style={{fontSize:8,color:"#1e2d3d"}}>—</div>
+                        ):(
+                          <>
+                            <div style={{fontSize:cell.isRowAnchor?12:10,fontWeight:cell.isRowAnchor?700:400,
+                              color:cell.isRowAnchor?v.color:isNearExpiry?"#fb923c":e.isDecember?"#94a3b8":e.isQuarterly?"#64748b":"#475569",
+                              fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                              {cell.price.toFixed(2)}
+                            </div>
+                            {isNearExpiry&&<div style={{fontSize:6,color:"#fb923c88",marginTop:1}}>LTD {cell.daysToLTD===0?"today":`${cell.daysToLTD}d`}</div>}
+                            {!isNearExpiry&&vsRJ6!=null&&(
+                              <div style={{fontSize:6,color:vsRJ6>=0?"#34d39955":"#f8717155",marginTop:1,fontVariantNumeric:"tabular-nums"}}>
+                                {vsRJ6>=0?"+":""}{vsRJ6.toFixed(2)}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* vs RJ6 spread */}
+                  <div style={{width:79,flexShrink:0,padding:"5px 4px",textAlign:"center",
+                    background:"#0b0f18",borderBottom:"1px solid #0a0e14",
+                    display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+                    {v.isAnchor?(
+                      <span style={{fontSize:8,color:"#06b6d4",fontWeight:700}}>anchor</span>
+                    ):(
+                      <>
+                        <div style={{fontSize:12,fontWeight:700,
+                          color:(rggiVintageSpreads[v.key]||0)>=0?"#34d399":"#f87171",
+                          fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                          {(rggiVintageSpreads[v.key]||0)>=0?"+":""}{(rggiVintageSpreads[v.key]||0).toFixed(2)}
+                        </div>
+                        <div style={{fontSize:6,color:"#334155",marginTop:1}}>vs RJ6</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* December anchor summary */}
+          <div style={{marginTop:14,padding:"10px 12px",background:"#0b0f18",border:"1px solid #182030",borderRadius:3}}>
+            <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:8}}>
+              December Anchor Summary — All Vintages
+            </div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+              {rggiMatrix.map(v=>{
+                const spread=v.isAnchor?0:(rggiVintageSpreads[v.key]||0);
+                return (
+                  <div key={v.key} style={{background:"#070b10",border:`1px solid ${v.color}33`,borderRadius:3,padding:"8px 12px",minWidth:120}}>
+                    <div style={{fontSize:8,color:v.color,fontWeight:700,marginBottom:4}}>{v.label} {v.isAnchor?"(anchor)":""}</div>
+                    <div style={{fontSize:18,fontWeight:700,color:v.isAnchor?"#06b6d4":"#d0dcea",
+                      fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                      ${v.anchorPx.toFixed(2)}
+                    </div>
+                    <div style={{fontSize:8,color:"#334155",marginTop:3}}>
+                      Dec-{RGGI_ROW_DEC_YEAR[v.key].toString().slice(2)}
+                      {!v.isAnchor&&<span style={{color:spread>=0?"#34d399":"#f87171",marginLeft:4,fontWeight:600}}>
+                        {spread>=0?"+":""}{spread.toFixed(2)}
+                      </span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{marginTop:10,borderTop:"1px solid #182030",paddingTop:8,
+            display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,
+            fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
+            <span>RGGI vintage matrix · Dec-26 RJ6 anchor · $0.01 tick · 1,000 allowances/contract · physical delivery via RGGI-COATS</span>
+            <span>2027 listing: Jan/Mar/Jun/Sep/Dec only (ICE standard cycle) · 2028 fully monthly</span>
+          </div>
+        </div>
+      )}
 
     </div>
   );
