@@ -231,15 +231,59 @@ const LCFS_OPT_EXPIRIES = LCFS_MONTHS.filter(c=>[2,5,8,11].includes(c.month)).sl
 const LCFS_STRIKES = Array.from({length:51},(x,i)=>50+i*5);
 
 // ─── CCA Vintage Matrix Constants ────────────────────────────────────────────
+// LTD dates keyed by expiry month label — same for all vintages
+// CB6 v26 exact dates from ICE; future months approximated
+const CCA_LTD = {
+  "Mar-26": new Date("2026-03-26"),
+  "Apr-26": new Date("2026-04-27"),
+  "May-26": new Date("2026-05-26"),
+  "Jun-26": new Date("2026-06-25"),
+  "Jul-26": new Date("2026-07-28"),
+  "Aug-26": new Date("2026-08-26"),
+  "Sep-26": new Date("2026-09-25"),
+  "Oct-26": new Date("2026-10-27"),
+  "Nov-26": new Date("2026-11-24"),
+  "Dec-26": new Date("2026-12-24"),
+  "Jan-27": new Date("2027-01-26"),
+  "Feb-27": new Date("2027-02-23"),
+  "Mar-27": new Date("2027-03-25"),
+  "Apr-27": new Date("2027-04-27"),
+  "May-27": new Date("2027-05-25"),
+  "Jun-27": new Date("2027-06-25"),
+  "Jul-27": new Date("2027-07-27"),
+  "Aug-27": new Date("2027-08-26"),
+  "Sep-27": new Date("2027-09-27"),
+  "Oct-27": new Date("2027-10-26"),
+  "Nov-27": new Date("2027-11-24"),
+  "Dec-27": new Date("2027-12-27"),
+};
+// Approximate LTD for months not yet published (~4th-last business day of month)
+function approxLTD(year, month) {
+  const d = new Date(year, month+1, 0); // last day of month
+  let bdays = 0;
+  while(bdays < 4) {
+    d.setDate(d.getDate()-1);
+    const dow = d.getDay();
+    if(dow!==0 && dow!==6) bdays++;
+  }
+  return new Date(d);
+}
+function getLTD(label, month, year) {
+  return CCA_LTD[label] || approxLTD(year, month);
+}
+
 // All monthly contracts Apr-26 through Dec-28 (33 months) — computed once
 const CCA_MATRIX_EXPIRIES = (()=>{
   const out=[]; let ey=2026,em=3;
   while(true){
-    out.push({label:`${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][em].slice(0,3)}-${String(ey).slice(2)}`,
-      month:em,year:ey,isDecember:em===11,isQuarterly:[2,5,8,11].includes(em)});
+    const label=`${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][em].slice(0,3)}-${String(ey).slice(2)}`;
+    out.push({label,month:em,year:ey,isDecember:em===11,isQuarterly:[2,5,8,11].includes(em),
+      ltd: getLTD(label, em, ey)});
     em++; if(em>11){em=0;ey++;}
     if(ey===2028&&em===11){
-      out.push({label:"Dec-28",month:11,year:2028,isDecember:true,isQuarterly:true});
+      const label2="Dec-28";
+      out.push({label:label2,month:11,year:2028,isDecember:true,isQuarterly:true,
+        ltd:getLTD(label2,11,2028)});
       break;
     }
   }
@@ -1477,19 +1521,22 @@ function CCADesk({ fbData, syncStatus }) {
   // ── CCA Vintage Matrix ────────────────────────────────────────────────────
   const vintageMatrix = useMemo(()=>{
     const r = baseRate/100;
+    const today = new Date(); today.setHours(0,0,0,0);
     return CCA_VINTAGES.map(v=>{
       const rowAnchorPx = v.isAnchor ? anchorPrice : anchorPrice + (vintageSpreads[v.key]||0);
       return {
         ...v,
         anchorPx: rowAnchorPx,
         cells: CCA_MATRIX_EXPIRIES.map(e=>{
-          // dt = months from Dec-26 to this expiry
           const dtMonths = (e.year-2026)*12 + (e.month-11);
           const px = rowAnchorPx * Math.exp(r * dtMonths/12);
+          const ltd = new Date(e.ltd); ltd.setHours(0,0,0,0);
           return {
             expiry:e,
             price:px,
             isRowAnchor: e.month===11 && e.year===CCA_ROW_DEC_YEAR[v.key],
+            isExpired: today > ltd,
+            daysToLTD: Math.round((ltd-today)/(24*3600*1000)),
           };
         }),
       };
@@ -2803,21 +2850,31 @@ function CCADesk({ fbData, syncStatus }) {
               {/* Month column headers */}
               <div style={{display:"flex",gap:1,marginBottom:1,paddingLeft:100}}>
                 {CCA_MATRIX_EXPIRIES.map(e=>{
-                  const expDate=new Date(e.year,e.month,15);
-                  const T=Math.max((expDate-new Date())/(365*24*3600*1000),0);
+                  const today = new Date(); today.setHours(0,0,0,0);
+                  const ltd = new Date(e.ltd); ltd.setHours(0,0,0,0);
+                  const isExpired = today > ltd;
+                  const daysToLTD = Math.round((ltd-today)/(24*3600*1000));
+                  const isNear = !isExpired && daysToLTD<=5;
                   return (
                     <div key={e.label} style={{
                       width:62,flexShrink:0,textAlign:"center",padding:"4px 2px",
-                      background:e.isDecember?"rgba(56,189,248,0.07)":e.isQuarterly?"rgba(56,189,248,0.03)":"#0b0f18",
+                      background: isExpired?"#060809"
+                        : isNear?"rgba(251,146,60,0.07)"
+                        : e.isDecember?"rgba(56,189,248,0.07)"
+                        : e.isQuarterly?"rgba(56,189,248,0.03)":"#0b0f18",
                       borderRadius:"2px 2px 0 0",
-                      borderBottom:`2px solid ${e.isDecember?"#38bdf866":e.isQuarterly?"#38bdf822":"#182030"}`,
+                      borderBottom:`2px solid ${isExpired?"#0f1318":isNear?"#fb923c88":e.isDecember?"#38bdf866":e.isQuarterly?"#38bdf822":"#182030"}`,
+                      opacity: isExpired?0.3:1,
                     }}>
                       <div style={{fontSize:9,fontWeight:e.isDecember?700:e.isQuarterly?600:400,
-                        color:e.isDecember?"#38bdf8":e.isQuarterly?"#38bdf888":"#334155",
+                        color: isExpired?"#1e2d3d":isNear?"#fb923c":e.isDecember?"#38bdf8":e.isQuarterly?"#38bdf888":"#334155",
                         fontFamily:"'IBM Plex Mono',monospace"}}>
                         {e.label.slice(0,3)}
                       </div>
-                      <div style={{fontSize:6,color:"#1e2d3d",marginTop:1}}>{(T*365).toFixed(0)}d</div>
+                      <div style={{fontSize:6,marginTop:1,
+                        color:isExpired?"#0f1318":isNear?"#fb923c88":"#1e2d3d"}}>
+                        {isExpired?"exp":isNear?`LTD ${daysToLTD===0?"today":`${daysToLTD}d`}`:`${Math.round((ltd-today)/(24*3600*1000))}d`}
+                      </div>
                     </div>
                   );
                 })}
@@ -2847,24 +2904,44 @@ function CCADesk({ fbData, syncStatus }) {
                     const e=cell.expiry;
                     const v26px=vintageMatrix.find(r=>r.key==="v26").cells[ci].price;
                     const vsV26=!v.isAnchor?cell.price-v26px:null;
+                    const isNearExpiry = !cell.isExpired && cell.daysToLTD>=0 && cell.daysToLTD<=5;
                     return (
                       <div key={e.label} style={{
                         width:62,flexShrink:0,padding:"5px 2px",textAlign:"center",
-                        background:cell.isRowAnchor?`${v.color}14`:e.isDecember?"rgba(56,189,248,0.03)":"#0b0f18",
-                        border:cell.isRowAnchor?`1px solid ${v.color}55`:"1px solid transparent",
-                        borderRadius:cell.isRowAnchor?2:0,
+                        background: cell.isExpired?"#060809"
+                          : cell.isRowAnchor?`${v.color}14`
+                          : isNearExpiry?"rgba(251,146,60,0.06)"
+                          : e.isDecember?"rgba(56,189,248,0.03)":"#0b0f18",
+                        border: cell.isRowAnchor?`1px solid ${v.color}55`
+                          : isNearExpiry?"1px solid #fb923c33"
+                          : "1px solid transparent",
+                        borderRadius:cell.isRowAnchor||isNearExpiry?2:0,
                         borderBottom:"1px solid #0a0e14",
+                        opacity: cell.isExpired?0.25:1,
                       }}>
-                        <div style={{fontSize:cell.isRowAnchor?12:10,fontWeight:cell.isRowAnchor?700:400,
-                          color:cell.isRowAnchor?v.color:e.isDecember?"#94a3b8":e.isQuarterly?"#64748b":"#475569",
-                          fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
-                          {cell.price.toFixed(2)}
-                        </div>
-                        {vsV26!=null&&(
-                          <div style={{fontSize:6,color:vsV26>=0?"#34d39955":"#f8717155",
-                            marginTop:1,fontVariantNumeric:"tabular-nums"}}>
-                            {vsV26>=0?"+":""}{vsV26.toFixed(2)}
+                        {cell.isExpired?(
+                          <div style={{fontSize:8,color:"#1e2d3d",fontVariantNumeric:"tabular-nums"}}>
+                            —
                           </div>
+                        ):(
+                          <>
+                            <div style={{fontSize:cell.isRowAnchor?12:10,fontWeight:cell.isRowAnchor?700:400,
+                              color:cell.isRowAnchor?v.color:isNearExpiry?"#fb923c":e.isDecember?"#94a3b8":e.isQuarterly?"#64748b":"#475569",
+                              fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                              {cell.price.toFixed(2)}
+                            </div>
+                            {isNearExpiry&&(
+                              <div style={{fontSize:6,color:"#fb923c88",marginTop:1}}>
+                                LTD {cell.daysToLTD===0?"today":`${cell.daysToLTD}d`}
+                              </div>
+                            )}
+                            {!isNearExpiry&&vsV26!=null&&(
+                              <div style={{fontSize:6,color:vsV26>=0?"#34d39955":"#f8717155",
+                                marginTop:1,fontVariantNumeric:"tabular-nums"}}>
+                                {vsV26>=0?"+":""}{vsV26.toFixed(2)}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     );
