@@ -1,5 +1,114 @@
 /* eslint-disable no-unused-vars */
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, onSnapshot, setDoc, getDoc } from "firebase/firestore";
+
+// ─── Firebase setup ───────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyCz98MDDgQVZbRVR8klPYMTcamqRcKUMX8",
+  authDomain: "cca-desk.firebaseapp.com",
+  projectId: "cca-desk",
+  storageBucket: "cca-desk.firebasestorage.app",
+  messagingSenderId: "666943082042",
+  appId: "1:666943082042:web:18860e19376eca67f5ef03"
+};
+const fbApp = initializeApp(firebaseConfig);
+const db    = getFirestore(fbApp);
+const DESK_DOC = doc(db, "desk", "shared-marks");
+
+// ─── App password ─────────────────────────────────────────────────────────────
+const APP_PASSWORD = "cca2026";
+
+// ─── Password gate component ──────────────────────────────────────────────────
+function PasswordGate({ onUnlock }) {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState(false);
+  const [shake, setShake] = useState(false);
+  function attempt() {
+    if(pw === APP_PASSWORD) {
+      localStorage.setItem("cca_auth","1");
+      onUnlock();
+    } else {
+      setErr(true);
+      setShake(true);
+      setPw("");
+      setTimeout(()=>setShake(false), 500);
+    }
+  }
+  return (
+    <div style={{
+      minHeight:"100vh",background:"#070b10",display:"flex",
+      alignItems:"center",justifyContent:"center",
+      fontFamily:"'IBM Plex Mono','Courier New',monospace",
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600;700&display=swap');
+        @keyframes shake {
+          0%,100%{transform:translateX(0)}
+          20%{transform:translateX(-8px)}
+          40%{transform:translateX(8px)}
+          60%{transform:translateX(-6px)}
+          80%{transform:translateX(6px)}
+        }
+        .shake { animation: shake 0.4s ease; }
+      `}</style>
+      <div style={{textAlign:"center",width:320}} className={shake?"shake":""}>
+        <div style={{fontSize:9,letterSpacing:"0.3em",color:"#1e2d3d",textTransform:"uppercase",marginBottom:8}}>
+          California Carbon Allowances
+        </div>
+        <div style={{fontSize:22,fontWeight:700,color:"#f0f4fa",marginBottom:4,letterSpacing:"-0.01em"}}>
+          CCA Derivatives Desk
+        </div>
+        <div style={{fontSize:9,color:"#334155",letterSpacing:"0.1em",marginBottom:32}}>
+          RESTRICTED ACCESS
+        </div>
+        <input
+          type="password"
+          value={pw}
+          onChange={e=>{setPw(e.target.value);setErr(false);}}
+          onKeyDown={e=>e.key==="Enter"&&attempt()}
+          placeholder="Enter password"
+          autoFocus
+          style={{
+            width:"100%",background:"#0b0f18",
+            border:`1px solid ${err?"#f87171":"#1e3a5f"}`,
+            color:"#d8e2ef",fontFamily:"'IBM Plex Mono',monospace",
+            fontSize:14,padding:"12px 16px",borderRadius:3,
+            outline:"none",letterSpacing:"0.1em",
+            boxSizing:"border-box",marginBottom:8,
+            textAlign:"center",
+          }}
+        />
+        {err&&<div style={{fontSize:9,color:"#f87171",marginBottom:8,letterSpacing:"0.08em"}}>
+          Incorrect password
+        </div>}
+        <button onClick={attempt} style={{
+          width:"100%",background:"#1e3a5f",border:"1px solid #38bdf8",
+          color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",
+          fontSize:10,fontWeight:700,letterSpacing:"0.15em",
+          padding:"11px 0",borderRadius:3,cursor:"pointer",
+          textTransform:"uppercase",transition:"all 0.15s",
+        }}
+        onMouseEnter={e=>{e.currentTarget.style.background="#38bdf8";e.currentTarget.style.color="#070b10";}}
+        onMouseLeave={e=>{e.currentTarget.style.background="#1e3a5f";e.currentTarget.style.color="#38bdf8";}}>
+          Unlock
+        </button>
+        <div style={{fontSize:8,color:"#1e2d3d",marginTop:20,letterSpacing:"0.08em"}}>
+          Authorised users only
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── localStorage fallback helpers (used only for UI-only state) ──────────────
+function lsGet(key, fallback) {
+  try { const v=localStorage.getItem(key); return v!==null?JSON.parse(v):fallback; }
+  catch(e) { return fallback; }
+}
+function lsSet(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MONTHS    = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -939,35 +1048,65 @@ function PopoutChain() {
 }
 
 
-// ─── localStorage persistence helpers ────────────────────────────────────────
-function lsGet(key, fallback) {
-  try {
-    const v = localStorage.getItem(key);
-    return v !== null ? JSON.parse(v) : fallback;
-  } catch(e) { return fallback; }
-}
-function lsSet(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) {}
+// ─── Main ─────────────────────────────────────────────────────────────────────
+// Top-level wrapper handles auth + Firebase sync
+export default function App() {
+  const [authed, setAuthed] = useState(()=>localStorage.getItem("cca_auth")==="1");
+  const [fbData, setFbData] = useState(null);
+  const [fbReady, setFbReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("connecting"); // connecting|live|error
+
+  // Once authed, subscribe to Firestore real-time updates
+  useEffect(()=>{
+    if(!authed) return;
+    setSyncStatus("connecting");
+    const unsub = onSnapshot(DESK_DOC,
+      snap => {
+        if(snap.exists()) setFbData(snap.data());
+        setFbReady(true);
+        setSyncStatus("live");
+      },
+      err => {
+        console.error("Firestore error:", err);
+        setSyncStatus("error");
+        setFbReady(true); // fall back to defaults
+      }
+    );
+    return ()=>unsub();
+  }, [authed]);
+
+  if(!authed) return <PasswordGate onUnlock={()=>setAuthed(true)}/>;
+  if(!fbReady) return (
+    <div style={{minHeight:"100vh",background:"#070b10",display:"flex",alignItems:"center",
+      justifyContent:"center",fontFamily:"'IBM Plex Mono',monospace",color:"#334155",fontSize:11,
+      letterSpacing:"0.1em"}}>
+      Connecting to shared desk…
+    </div>
+  );
+
+  return <CCADesk fbData={fbData} syncStatus={syncStatus}/>;
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
-export default function CCADesk() {
+function CCADesk({ fbData, syncStatus }) {
   // ── Detect pop-out mode ──────────────────────────────────────────────────────
   const isPopout = new URLSearchParams(window.location.search).get("popout")==="1";
   if(isPopout) return <PopoutChain/>;
 
-  // ── Futures state
-  const [anchorPrice,setAnchorPrice] = useState(()=>lsGet('cca_anchorPrice',30.00));
-  const [priceInput,setPriceInput]   = useState(()=>String(lsGet('cca_anchorPrice',30.00)));
-  const [quarterRates,setQuarterRates] = useState(()=>lsGet('cca_quarterRates',[5.25,5.00,4.75,4.50]));
-  const [baseRate,setBaseRate]         = useState(()=>lsGet('cca_baseRate',4.25));
+  // ── Helper: get value from Firebase or fallback ───────────────────────────
+  function fb(key, fallback) { return fbData?.[key] ?? fallback; }
 
-  // ── Vol surface state
-  const [atmVol,setAtmVol]       = useState(()=>lsGet('cca_atmVol',0.35));
-  const [skew,setSkew]           = useState(()=>lsGet('cca_skew',-0.08));
-  const [convexity,setConvexity] = useState(()=>lsGet('cca_convexity',0.20));
+  // ── Futures state ─────────────────────────────────────────────────────────
+  const [anchorPrice,setAnchorPrice] = useState(()=>fb('cca_anchorPrice',30.00));
+  const [priceInput,setPriceInput]   = useState(()=>String(fb('cca_anchorPrice',30.00)));
+  const [quarterRates,setQuarterRates] = useState(()=>fb('cca_quarterRates',[5.25,5.00,4.75,4.50]));
+  const [baseRate,setBaseRate]         = useState(()=>fb('cca_baseRate',4.25));
+
+  // ── Vol surface state ─────────────────────────────────────────────────────
+  const [atmVol,setAtmVol]       = useState(()=>fb('cca_atmVol',0.35));
+  const [skew,setSkew]           = useState(()=>fb('cca_skew',-0.08));
+  const [convexity,setConvexity] = useState(()=>fb('cca_convexity',0.20));
   const [perStrikeAdj,setPerStrikeAdj] = useState(
-    ()=>lsGet('cca_perStrikeAdj',Object.fromEntries(STRIKES.map(k=>[k,0])))
+    ()=>fb('cca_perStrikeAdj',Object.fromEntries(STRIKES.map(k=>[k,0])))
   );
 
   // ── Options state
@@ -990,15 +1129,15 @@ export default function CCADesk() {
   const [spreadNear,setSpreadNear] = useState("Apr-26");
   // ── Per-month carry rates ──────────────────────────────────────────────────────
   const WP_DEFAULT_MONTHLY_RATES = {"Apr-26":5.0,"May-26":5.0,"Jun-26":5.0,"Jul-26":5.0,"Aug-26":5.0,"Sep-26":5.0,"Oct-26":5.0,"Nov-26":5.0,"Dec-26":5.0,"Jan-27":4.5,"Feb-27":4.5,"Mar-27":4.5,"Apr-27":4.5,"May-27":4.5,"Jun-27":4.5,"Jul-27":4.5,"Aug-27":4.5,"Sep-27":4.5,"Oct-27":4.5,"Nov-27":4.5,"Dec-27":4.5,"Jan-28":4.25,"Feb-28":4.25,"Mar-28":4.25,"Apr-28":4.25,"May-28":4.25,"Jun-28":4.25,"Jul-28":4.25,"Aug-28":4.25,"Sep-28":4.25,"Oct-28":4.25,"Nov-28":4.25,"Dec-28":4.25};
-  const [monthlyRates,setMonthlyRates] = useState(()=>lsGet('cca_monthlyRates', WP_DEFAULT_MONTHLY_RATES));
+  const [monthlyRates,setMonthlyRates] = useState(()=>fb('cca_monthlyRates', WP_DEFAULT_MONTHLY_RATES));
   function setMonthlyRate(label, val) { setMonthlyRates(p=>({...p,[label]:val})); }
   const [spreadFar,setSpreadFar]   = useState("Dec-26");
   const [futuresBlotter,setFuturesBlotter] = useState([]);
 
   // ── West Power state ──────────────────────────────────────────────────────────
   const wpCalYears = [new Date().getFullYear(), new Date().getFullYear()+1];
-  const [wpSP15,setWpSP15]           = useState(()=>lsGet('wp_sp15',WP_INIT_SP15));
-  const [wpSpreads,setWpSpreads]     = useState(()=>lsGet('wp_spreads',WP_INIT_SPREADS));
+  const [wpSP15,setWpSP15]           = useState(()=>fb('wp_sp15',WP_INIT_SP15));
+  const [wpSpreads,setWpSpreads]     = useState(()=>fb('wp_spreads',WP_INIT_SPREADS));
   const [wpActiveHub,setWpActiveHub] = useState("SP15");
   const [wpActiveType,setWpActiveType] = useState("monthly");
   const [wpFutBlotter,setWpFutBlotter] = useState([]);
@@ -1036,11 +1175,11 @@ export default function CCADesk() {
   const [wpOptHub,setWpOptHub]           = useState("SP15");
   const [wpOptType,setWpOptType]         = useState("daily");   // daily | monthly
   const [wpOptMonth,setWpOptMonth]       = useState("Jan");
-  const [wpOptAtmVol,setWpOptAtmVol]     = useState(()=>lsGet('wp_optAtmVol',20));
-  const [wpOptSkew,setWpOptSkew]         = useState(()=>lsGet('wp_optSkew',-0.5));
-  const [wpOptConvexity,setWpOptConvexity] = useState(()=>lsGet('wp_optConvexity',0.05));
+  const [wpOptAtmVol,setWpOptAtmVol]     = useState(()=>fb('wp_optAtmVol',20));
+  const [wpOptSkew,setWpOptSkew]         = useState(()=>fb('wp_optSkew',-0.5));
+  const [wpOptConvexity,setWpOptConvexity] = useState(()=>fb('wp_optConvexity',0.05));
   const [wpOptPerStrike,setWpOptPerStrike] = useState(
-    ()=>lsGet('wp_optPerStrike',Object.fromEntries(WP_OPT_STRIKES.map(k=>[k,0])))
+    ()=>fb('wp_optPerStrike',Object.fromEntries(WP_OPT_STRIKES.map(k=>[k,0])))
   );
 
   // ── ACP state ────────────────────────────────────────────────────────────────
@@ -1052,21 +1191,33 @@ export default function CCADesk() {
     return Math.max(0.5, base + (wpOptPerStrike[K]||0));
   }
 
-  // ── Persist all pricing state to localStorage ────────────────────────────────
-  useEffect(()=>{ lsSet('cca_anchorPrice',  anchorPrice);  }, [anchorPrice]);
-  useEffect(()=>{ lsSet('cca_quarterRates', quarterRates); }, [quarterRates]);
-  useEffect(()=>{ lsSet('cca_baseRate',     baseRate);     }, [baseRate]);
-  useEffect(()=>{ lsSet('cca_monthlyRates', monthlyRates);}, [monthlyRates]);
-  useEffect(()=>{ lsSet('cca_atmVol',       atmVol);       }, [atmVol]);
-  useEffect(()=>{ lsSet('cca_skew',         skew);         }, [skew]);
-  useEffect(()=>{ lsSet('cca_convexity',    convexity);    }, [convexity]);
-  useEffect(()=>{ lsSet('cca_perStrikeAdj', perStrikeAdj); }, [perStrikeAdj]);
-  useEffect(()=>{ lsSet('wp_sp15',          wpSP15);       }, [wpSP15]);
-  useEffect(()=>{ lsSet('wp_spreads',       wpSpreads);    }, [wpSpreads]);
-  useEffect(()=>{ lsSet('wp_optAtmVol',     wpOptAtmVol);  }, [wpOptAtmVol]);
-  useEffect(()=>{ lsSet('wp_optSkew',       wpOptSkew);    }, [wpOptSkew]);
-  useEffect(()=>{ lsSet('wp_optConvexity',  wpOptConvexity);}, [wpOptConvexity]);
-  useEffect(()=>{ lsSet('wp_optPerStrike',  wpOptPerStrike);}, [wpOptPerStrike]);
+  // ── Sync all pricing state to Firestore (debounced 800ms) ────────────────
+  const syncTimer = useRef(null);
+  useEffect(()=>{
+    if(syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(()=>{
+      const payload = {
+        cca_anchorPrice:  anchorPrice,
+        cca_quarterRates: quarterRates,
+        cca_baseRate:     baseRate,
+        cca_monthlyRates: monthlyRates,
+        cca_atmVol:       atmVol,
+        cca_skew:         skew,
+        cca_convexity:    convexity,
+        cca_perStrikeAdj: perStrikeAdj,
+        wp_sp15:          wpSP15,
+        wp_spreads:       wpSpreads,
+        wp_optAtmVol:     wpOptAtmVol,
+        wp_optSkew:       wpOptSkew,
+        wp_optConvexity:  wpOptConvexity,
+        wp_optPerStrike:  wpOptPerStrike,
+        _lastUpdated:     Date.now(),
+      };
+      setDoc(DESK_DOC, payload, {merge:true}).catch(e=>console.error("Firestore write error:",e));
+    }, 800);
+    return ()=>{ if(syncTimer.current) clearTimeout(syncTimer.current); };
+  }, [anchorPrice,quarterRates,baseRate,monthlyRates,atmVol,skew,convexity,
+      perStrikeAdj,wpSP15,wpSpreads,wpOptAtmVol,wpOptSkew,wpOptConvexity,wpOptPerStrike]);
 
   // Quarter → month mapping for 2026 curve months
   const QUARTER_MONTHS_2026 = {
@@ -1082,6 +1233,27 @@ export default function CCADesk() {
     2: ["Jul","Aug","Sep"],
     3: ["Oct","Nov","Dec"],
   };
+
+  // ── Apply incoming Firestore updates from other users ─────────────────────
+  const isLocalChange = useRef(false);
+  useEffect(()=>{
+    if(!fbData || isLocalChange.current) return;
+    // Only update state from remote if value differs (avoid infinite loop)
+    if(fbData.cca_anchorPrice  !== undefined) setAnchorPrice(fbData.cca_anchorPrice);
+    if(fbData.cca_quarterRates !== undefined) setQuarterRates(fbData.cca_quarterRates);
+    if(fbData.cca_baseRate     !== undefined) setBaseRate(fbData.cca_baseRate);
+    if(fbData.cca_monthlyRates !== undefined) setMonthlyRates(fbData.cca_monthlyRates);
+    if(fbData.cca_atmVol       !== undefined) setAtmVol(fbData.cca_atmVol);
+    if(fbData.cca_skew         !== undefined) setSkew(fbData.cca_skew);
+    if(fbData.cca_convexity    !== undefined) setConvexity(fbData.cca_convexity);
+    if(fbData.cca_perStrikeAdj !== undefined) setPerStrikeAdj(fbData.cca_perStrikeAdj);
+    if(fbData.wp_sp15          !== undefined) setWpSP15(fbData.wp_sp15);
+    if(fbData.wp_spreads       !== undefined) setWpSpreads(fbData.wp_spreads);
+    if(fbData.wp_optAtmVol     !== undefined) setWpOptAtmVol(fbData.wp_optAtmVol);
+    if(fbData.wp_optSkew       !== undefined) setWpOptSkew(fbData.wp_optSkew);
+    if(fbData.wp_optConvexity  !== undefined) setWpOptConvexity(fbData.wp_optConvexity);
+    if(fbData.wp_optPerStrike  !== undefined) setWpOptPerStrike(fbData.wp_optPerStrike);
+  }, [fbData]);
 
   function setQR(i, v) {
     setQuarterRates(p => p.map((r, j) => j === i ? v : r));
@@ -1481,17 +1653,27 @@ export default function CCADesk() {
           <div style={{fontSize:21,fontWeight:600,color:"#f0f4fa",fontFamily:"'IBM Plex Sans',sans-serif",letterSpacing:"-0.01em"}}>
             CCA Derivatives Pricer
           </div>
-          <button onClick={generateEODReport} style={{
-            background:"#0f172a",border:"1px solid #334155",borderRadius:3,
-            color:"#f0f4fa",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,
-            fontWeight:700,letterSpacing:"0.12em",padding:"8px 16px",
-            cursor:"pointer",textTransform:"uppercase",
-            display:"flex",alignItems:"center",gap:8,transition:"all 0.15s",
-          }}
-          onMouseEnter={e=>{e.currentTarget.style.background="#1e293b";e.currentTarget.style.borderColor="#38bdf8";e.currentTarget.style.color="#38bdf8";}}
-          onMouseLeave={e=>{e.currentTarget.style.background="#0f172a";e.currentTarget.style.borderColor="#334155";e.currentTarget.style.color="#f0f4fa";}}>
-            <span style={{fontSize:14}}>⬡</span> EOD Report
-          </button>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:5,fontSize:8,letterSpacing:"0.08em",
+              color:syncStatus==="live"?"#34d399":syncStatus==="error"?"#f87171":"#fb923c"}}>
+              <div style={{width:6,height:6,borderRadius:"50%",
+                background:syncStatus==="live"?"#34d399":syncStatus==="error"?"#f87171":"#fb923c",
+                boxShadow:syncStatus==="live"?"0 0 6px #34d399":"none",
+              }}/>
+              {syncStatus==="live"?"LIVE":syncStatus==="error"?"SYNC ERR":"…"}
+            </div>
+            <button onClick={generateEODReport} style={{
+              background:"#0f172a",border:"1px solid #334155",borderRadius:3,
+              color:"#f0f4fa",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,
+              fontWeight:700,letterSpacing:"0.12em",padding:"8px 16px",
+              cursor:"pointer",textTransform:"uppercase",
+              display:"flex",alignItems:"center",gap:8,transition:"all 0.15s",
+            }}
+            onMouseEnter={e=>{e.currentTarget.style.background="#1e293b";e.currentTarget.style.borderColor="#38bdf8";e.currentTarget.style.color="#38bdf8";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="#0f172a";e.currentTarget.style.borderColor="#334155";e.currentTarget.style.color="#f0f4fa";}}>
+              <span style={{fontSize:14}}>⬡</span> EOD Report
+            </button>
+          </div>
         </div>
       </div>
 
