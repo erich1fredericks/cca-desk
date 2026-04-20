@@ -986,7 +986,12 @@ export default function CCADesk() {
   const [sQty,setSQty]                     = useState(100);
 
   // ── Spread state
+  const [showSpreadGen,setShowSpreadGen] = useState(false);
   const [spreadNear,setSpreadNear] = useState("Apr-26");
+  // ── Per-month carry rates ──────────────────────────────────────────────────────
+  const WP_DEFAULT_MONTHLY_RATES = {"Apr-26":5.0,"May-26":5.0,"Jun-26":5.0,"Jul-26":5.0,"Aug-26":5.0,"Sep-26":5.0,"Oct-26":5.0,"Nov-26":5.0,"Dec-26":5.0,"Jan-27":4.5,"Feb-27":4.5,"Mar-27":4.5,"Apr-27":4.5,"May-27":4.5,"Jun-27":4.5,"Jul-27":4.5,"Aug-27":4.5,"Sep-27":4.5,"Oct-27":4.5,"Nov-27":4.5,"Dec-27":4.5,"Jan-28":4.25,"Feb-28":4.25,"Mar-28":4.25,"Apr-28":4.25,"May-28":4.25,"Jun-28":4.25,"Jul-28":4.25,"Aug-28":4.25,"Sep-28":4.25,"Oct-28":4.25,"Nov-28":4.25,"Dec-28":4.25};
+  const [monthlyRates,setMonthlyRates] = useState(()=>lsGet('cca_monthlyRates', WP_DEFAULT_MONTHLY_RATES));
+  function setMonthlyRate(label, val) { setMonthlyRates(p=>({...p,[label]:val})); }
   const [spreadFar,setSpreadFar]   = useState("Dec-26");
   const [futuresBlotter,setFuturesBlotter] = useState([]);
 
@@ -1038,6 +1043,35 @@ export default function CCADesk() {
     ()=>lsGet('wp_optPerStrike',Object.fromEntries(WP_OPT_STRIKES.map(k=>[k,0])))
   );
 
+  // ── ACP state ────────────────────────────────────────────────────────────────
+  // Floor price schedule: $27.94 base, +7.5%/yr (5% + 2.5% CPI)
+  const ACP_CONTRACTS = [
+    {label:"Feb-26",month:1,year:2026,deliveredCCA:"Mar-26",deliveredMonth:2,deliveredYear:2026},
+    {label:"May-26",month:4,year:2026,deliveredCCA:"Jun-26",deliveredMonth:5,deliveredYear:2026},
+    {label:"Aug-26",month:7,year:2026,deliveredCCA:"Sep-26",deliveredMonth:8,deliveredYear:2026},
+    {label:"Nov-26",month:10,year:2026,deliveredCCA:"Dec-26",deliveredMonth:11,deliveredYear:2026},
+    {label:"Feb-27",month:1,year:2027,deliveredCCA:"Mar-27",deliveredMonth:2,deliveredYear:2027},
+    {label:"May-27",month:4,year:2027,deliveredCCA:"Jun-27",deliveredMonth:5,deliveredYear:2027},
+    {label:"Aug-27",month:7,year:2027,deliveredCCA:"Sep-27",deliveredMonth:8,deliveredYear:2027},
+    {label:"Nov-27",month:10,year:2027,deliveredCCA:"Dec-27",deliveredMonth:11,deliveredYear:2027},
+    {label:"Feb-28",month:1,year:2028,deliveredCCA:"Mar-28",deliveredMonth:2,deliveredYear:2028},
+    {label:"May-28",month:4,year:2028,deliveredCCA:"Jun-28",deliveredMonth:5,deliveredYear:2028},
+    {label:"Aug-28",month:7,year:2028,deliveredCCA:"Sep-28",deliveredMonth:8,deliveredYear:2028},
+    {label:"Nov-28",month:10,year:2028,deliveredCCA:"Dec-28",deliveredMonth:11,deliveredYear:2028},
+  ];
+  const [acpFloorBase,setAcpFloorBase]       = useState(()=>lsGet('acp_floorBase',27.94));
+  const [acpFloorGrowth,setAcpFloorGrowth]   = useState(()=>lsGet('acp_floorGrowth',7.5));
+  // Per-contract: { basis (mid), basisVol ($/tonne), marketBid, marketAsk }
+  const [acpParams,setAcpParams]             = useState(()=>lsGet('acp_params',{}));
+  const [acpSelContract,setAcpSelContract]   = useState("May-26");
+
+  function acpGetParam(label, key, def) {
+    return acpParams[label]?.[key] ?? def;
+  }
+  function acpSetParam(label, key, val) {
+    setAcpParams(p=>({...p,[label]:{...(p[label]||{}), [key]:val}}));
+  }
+
   function wpOptVol(K, F) {
     // Bachelier: absolute vol in $/MWh, linear moneyness (K-F) in $/MWh
     const m = K - F;
@@ -1049,6 +1083,7 @@ export default function CCADesk() {
   useEffect(()=>{ lsSet('cca_anchorPrice',  anchorPrice);  }, [anchorPrice]);
   useEffect(()=>{ lsSet('cca_quarterRates', quarterRates); }, [quarterRates]);
   useEffect(()=>{ lsSet('cca_baseRate',     baseRate);     }, [baseRate]);
+  useEffect(()=>{ lsSet('cca_monthlyRates', monthlyRates);}, [monthlyRates]);
   useEffect(()=>{ lsSet('cca_atmVol',       atmVol);       }, [atmVol]);
   useEffect(()=>{ lsSet('cca_skew',         skew);         }, [skew]);
   useEffect(()=>{ lsSet('cca_convexity',    convexity);    }, [convexity]);
@@ -1059,12 +1094,83 @@ export default function CCADesk() {
   useEffect(()=>{ lsSet('wp_optSkew',       wpOptSkew);    }, [wpOptSkew]);
   useEffect(()=>{ lsSet('wp_optConvexity',  wpOptConvexity);}, [wpOptConvexity]);
   useEffect(()=>{ lsSet('wp_optPerStrike',  wpOptPerStrike);}, [wpOptPerStrike]);
+  useEffect(()=>{ lsSet('acp_floorBase',    acpFloorBase);  }, [acpFloorBase]);
+  useEffect(()=>{ lsSet('acp_floorGrowth',  acpFloorGrowth);}, [acpFloorGrowth]);
+  useEffect(()=>{ lsSet('acp_params',       acpParams);     }, [acpParams]);
 
-  function setQR(i,v){ setQuarterRates(p=>p.map((r,j)=>j===i?v:r)); }
+  // Quarter → month mapping for 2026 curve months
+  const QUARTER_MONTHS_2026 = {
+    0: ["Jan-26","Feb-26","Mar-26","Apr-26","May-26","Jun-26"],  // Q1+Q2 start but Apr-26 is curve start
+    1: ["Apr-26","May-26","Jun-26"],
+    2: ["Jul-26","Aug-26","Sep-26"],
+    3: ["Oct-26","Nov-26","Dec-26"],
+  };
+  // Q1 = Jan-Mar, Q2 = Apr-Jun, Q3 = Jul-Sep, Q4 = Oct-Dec
+  const QMONTHS = {
+    0: ["Jan","Feb","Mar"],
+    1: ["Apr","May","Jun"],
+    2: ["Jul","Aug","Sep"],
+    3: ["Oct","Nov","Dec"],
+  };
+
+  function setQR(i, v) {
+    setQuarterRates(p => p.map((r, j) => j === i ? v : r));
+    // Cascade to monthly rates for all 2026 months in this quarter
+    setMonthlyRates(prev => {
+      const updated = {...prev};
+      QMONTHS[i].forEach(mo => {
+        const key = `${mo}-26`;
+        if(key in updated) updated[key] = v;
+      });
+      return updated;
+    });
+  }
+
+  function setBaseRateAndCascade(v) {
+    setBaseRate(v);
+    // Cascade to all 2027 and 2028 monthly rates
+    setMonthlyRates(prev => {
+      const updated = {...prev};
+      Object.keys(updated).forEach(key => {
+        if(key.endsWith("-27") || key.endsWith("-28")) {
+          updated[key] = v;
+        }
+      });
+      return updated;
+    });
+  }
+
   function commitPrice(v){ const n=parseFloat(v); if(!isNaN(n)&&n>0) setAnchorPrice(n); }
 
   // ── Futures curve
+  // Build effective rate for each contract using monthlyRates override if set
+  function getEffectiveRate(contractLabel, fallbackRate) {
+    const r = monthlyRates[contractLabel];
+    return (r !== undefined && r !== null) ? r : fallbackRate;
+  }
   const curve = useMemo(()=>buildForwardCurve(anchorPrice,quarterRates,baseRate),[anchorPrice,quarterRates,baseRate]);
+  // Override curve prices using per-month rates
+  const curveWithMonthlyRates = useMemo(()=>{
+    if(!curve.length) return curve;
+    const anchorDate = new Date(2026,11,15);
+    const result = [];
+    for(let i=0;i<curve.length;i++){
+      const c = curve[i];
+      const label = c.label;
+      const overrideRate = monthlyRates[label];
+      if(overrideRate!==undefined) {
+        // Recompute price from anchor using this month's override rate
+        // Simple: price = anchor * exp(r_override * T)
+        const cellDate = new Date(c.year,c.month,15);
+        const dtYears = (cellDate-anchorDate)/(365.25*24*3600*1000);
+        const price = anchorPrice * Math.exp((overrideRate/100)*dtYears);
+        result.push({...c, price, effectiveRate:overrideRate});
+      } else {
+        result.push(c);
+      }
+    }
+    return result;
+  },[curve, monthlyRates, anchorPrice]);
 
   // Map label → {price, T}
   const expiryPriceMap = useMemo(()=>{
@@ -1082,9 +1188,9 @@ export default function CCADesk() {
   // ── Spread calculator
   const curveMap = useMemo(()=>{
     const m={};
-    curve.forEach(c=>{ m[c.label]={price:c.price,month:c.month,year:c.year}; });
+    curveWithMonthlyRates.forEach(c=>{ m[c.label]={price:c.price,month:c.month,year:c.year}; });
     return m;
-  },[curve]);
+  },[curveWithMonthlyRates]);
 
   const spreadNearData = curveMap[spreadNear];
   const spreadFarData  = curveMap[spreadFar];
@@ -1129,11 +1235,11 @@ export default function CCADesk() {
   const maxPut  = Math.max(...rows.map(r=>r.put));
 
   // ── Futures table grouping
-  const minP = Math.min(...curve.map(c=>c.price));
-  const maxP = Math.max(...curve.map(c=>c.price));
+  const minP = Math.min(...curveWithMonthlyRates.map(c=>c.price));
+  const maxP = Math.max(...curveWithMonthlyRates.map(c=>c.price));
   const pRange = maxP-minP||1;
   const byYear = {};
-  curve.forEach(c=>{ if(!byYear[c.year])byYear[c.year]=[]; byYear[c.year].push(c); });
+  curveWithMonthlyRates.forEach(c=>{ if(!byYear[c.year])byYear[c.year]=[]; byYear[c.year].push(c); });
 
   const pctFmt = v=>`${(v*100).toFixed(1)}%`;
   const skewFmt = v=>`${v>=0?"+":""}${(v*100).toFixed(1)}%`;
@@ -1445,7 +1551,7 @@ export default function CCADesk() {
               <RateInput key={qi} value={rate} onChange={v=>setQR(qi,v)} color={Q_COLORS[qi]} label={Q_SHORT[qi]}/>
             ))}
             <div style={{width:1,background:"#182030",alignSelf:"stretch",margin:"0 2px"}}/>
-            <RateInput value={baseRate} onChange={setBaseRate} color="#64748b" label="2027+"/>
+            <RateInput value={baseRate} onChange={setBaseRateAndCascade} color="#64748b" label="2027+"/>
           </div>
         </div>
 
@@ -1478,6 +1584,7 @@ export default function CCADesk() {
           {label:"Futures Curve",badge:null},
           {label:"West Power",badge:null},
           {label:"Power Options",badge:null},
+          {label:"ACP Pricer",badge:null},
         ].map(({label,badge},i)=>(
           <button key={label} className={`tab-btn${tab===i?" on":""}`} onClick={()=>setTab(i)}
             style={{position:"relative"}}>
@@ -1496,50 +1603,31 @@ export default function CCADesk() {
       {/* ════════════ MARKET VIEW TAB (read-only clean chain) ════════════ */}
       {tab===0 && (
         <div>
-          {/* Sticky expiry + info bar */}
+          {/* ── Single sticky header: futures strip (controls expiry) ── */}
           <div style={{
             position:"sticky",top:0,zIndex:20,
             background:"#070b10",
             borderBottom:"1px solid #182030",
-            paddingBottom:10,marginBottom:12,
-            paddingTop:4,
+            paddingBottom:10,
+            paddingTop:6,
+            marginBottom:12,
           }}>
-          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            {OPTIONS_EXPIRIES.map(e=>{
-              const key=`${MONTHS[e.month].slice(0,3)}-${String(e.year).slice(2)}`;
-              const isSel=selectedExpiry===key;
-              const cp=expiryPriceMap[key];
-              return (
-                <button key={key} onClick={()=>setSelectedExpiry(key)} style={{
-                  padding:"6px 14px",fontFamily:"'IBM Plex Mono',monospace",
-                  fontSize:11,fontWeight:isSel?700:400,letterSpacing:"0.06em",
-                  borderRadius:2,cursor:"pointer",border:"1px solid",
-                  borderColor:isSel?"#38bdf8":"#182030",
-                  background:isSel?"rgba(56,189,248,0.10)":"#0b0f18",
-                  color:isSel?"#38bdf8":"#475569",transition:"all 0.12s",
-                  display:"flex",flexDirection:"column",alignItems:"center",gap:2,
-                }}>
-                  <span>{key}</span>
-                  {cp&&<span style={{fontSize:10,color:isSel?"#7dd3fc":"#334155",fontWeight:600}}>${cp.price.toFixed(2)}</span>}
-                </button>
-              );
-            })}
-            <div style={{marginLeft:"auto",display:"flex",gap:16,alignItems:"center"}}>
-              <span style={{fontSize:10,color:"#334155"}}>F <span style={{color:"#38bdf8",fontWeight:700,fontSize:14}}>${F.toFixed(2)}</span></span>
-              <span style={{fontSize:10,color:"#334155"}}>T <span style={{color:"#34d399",fontWeight:600}}>{(T*365).toFixed(0)}d</span></span>
-              <span style={{fontSize:10,color:"#334155"}}>ATM vol <span style={{color:"#fb923c",fontWeight:600}}>{(atmVol*100).toFixed(1)}%</span></span>
-              <span style={{fontSize:10,color:"#334155"}}>skew <span style={{color:"#a78bfa",fontWeight:600}}>{skew>=0?"+":""}{(skew*100).toFixed(1)}%</span></span>
+            {/* Info row */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{display:"flex",gap:16,alignItems:"center"}}>
+                <span style={{fontSize:9,letterSpacing:"0.12em",color:"#334155",textTransform:"uppercase"}}>
+                  CCA Futures — click contract to price options
+                </span>
+                <span style={{fontSize:10,color:"#334155"}}>F <span style={{color:"#38bdf8",fontWeight:700,fontSize:13}}>${F.toFixed(2)}</span></span>
+                <span style={{fontSize:10,color:"#334155"}}>T <span style={{color:"#34d399",fontWeight:600}}>{(T*365).toFixed(0)}d</span></span>
+                <span style={{fontSize:10,color:"#334155"}}>ATM <span style={{color:"#fb923c",fontWeight:600}}>{(atmVol*100).toFixed(1)}%</span></span>
+                <span style={{fontSize:10,color:"#334155"}}>skew <span style={{color:"#a78bfa",fontWeight:600}}>{skew>=0?"+":""}{(skew*100).toFixed(1)}%</span></span>
+              </div>
               <button onClick={()=>{
                 const adjStr=STRIKES.filter(k=>perStrikeAdj[k]!==0).map(k=>k+":"+perStrikeAdj[k]).join(";");
                 const p=new URLSearchParams({
-                  popout:"1",
-                  ap:anchorPrice,
-                  qr:quarterRates.join(","),
-                  br:baseRate,
-                  av:atmVol,
-                  sk:skew,
-                  cv:convexity,
-                  exp:selectedExpiry,
+                  popout:"1",ap:anchorPrice,qr:quarterRates.join(","),br:baseRate,
+                  av:atmVol,sk:skew,cv:convexity,exp:selectedExpiry,
                   ...(adjStr?{adj:adjStr}:{})
                 });
                 window.open("?"+p.toString(),"_blank","width=900,height=820,toolbar=0,menubar=0,location=0");
@@ -1554,7 +1642,63 @@ export default function CCADesk() {
                 <span style={{fontSize:11}}>⤢</span> POP OUT
               </button>
             </div>
-          </div>
+
+            {/* Futures price strip — clicking sets option chain expiry */}
+            {(()=>{
+              const spotContract = curveWithMonthlyRates.find(c=>c.label==="Apr-26");
+              const qLabels = curveWithMonthlyRates
+                .filter(c=>c.isQExpiry||c.isAnchor)
+                .map(c=>({label:c.label,price:c.price,isAnchor:c.isAnchor,month:c.month,year:c.year}));
+              const decContracts = qLabels.filter(c=>c.month===11);
+              const secondDec = decContracts[1];
+              const strip = [];
+              if(spotContract) strip.push({label:"Apr-26",price:spotContract.price,isSpot:true,isAnchor:false,month:3,year:2026});
+              for(const q of qLabels) {
+                if(secondDec&&(q.year>secondDec.year||(q.year===secondDec.year&&q.month>secondDec.month))) break;
+                strip.push({...q,isSpot:false});
+              }
+              return (
+                <div style={{overflowX:"auto"}}>
+                  <div style={{display:"flex",gap:6,minWidth:"max-content"}}>
+                    {strip.map((c,i)=>{
+                      const isSelected=!c.isSpot&&c.label===selectedExpiry;
+                      const spreadVsPrev=i>0?c.price-strip[i-1].price:null;
+                      return (
+                        <div key={c.label}
+                          onClick={()=>{if(!c.isSpot)setSelectedExpiry(c.label);}}
+                          style={{
+                            minWidth:88,
+                            background:c.isSpot?"#0b0f18":isSelected?"rgba(56,189,248,0.12)":c.isAnchor?"rgba(56,189,248,0.06)":"#0b0f18",
+                            border:`1px solid ${c.isSpot?"#1e2d3d":isSelected?"#38bdf8":c.isAnchor?"#38bdf844":"#182030"}`,
+                            borderRadius:3,padding:"7px 10px",
+                            cursor:c.isSpot?"default":"pointer",
+                            transition:"border-color 0.12s",
+                          }}
+                          onMouseEnter={e=>{if(!c.isSpot)e.currentTarget.style.borderColor="#38bdf8";}}
+                          onMouseLeave={e=>{if(!c.isSpot)e.currentTarget.style.borderColor=isSelected?"#38bdf8":c.isAnchor?"#38bdf844":"#182030";}}
+                        >
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:3}}>
+                            <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.07em",color:c.isSpot?"#64748b":isSelected?"#38bdf8":c.isAnchor?"#7dd3fc":"#64748b"}}>
+                              {c.isSpot?"SPOT":c.label}
+                            </span>
+                            {c.isSpot&&<span style={{fontSize:7,color:"#334155"}}>Apr-26</span>}
+                            {c.isAnchor&&!c.isSpot&&<span style={{fontSize:7,color:"#38bdf855"}}>●</span>}
+                          </div>
+                          <div style={{fontSize:16,fontWeight:700,color:c.isSpot?"#94a3b8":isSelected?"#38bdf8":"#d0dcea",fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums",marginBottom:3,letterSpacing:"-0.01em"}}>
+                            ${c.price.toFixed(2)}
+                          </div>
+                          {spreadVsPrev!==null&&(
+                            <div style={{fontSize:9,fontWeight:600,color:spreadVsPrev>=0?"#34d399":"#f87171",fontVariantNumeric:"tabular-nums"}}>
+                              {spreadVsPrev>=0?"+":""}{spreadVsPrev.toFixed(2)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Clean read-only chain — strike in middle, sticky header */}
@@ -1795,19 +1939,16 @@ export default function CCADesk() {
             </div>
 
             {/* Vol parameters — compact for chain view */}
-            <div className="panel" style={{flex:1,minWidth:300}}>
-              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>Volatility Parameters</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 18px"}}>
+            <div className="panel" style={{flex:1,minWidth:240}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:8}}>Volatility Parameters</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"0 10px"}}>
                 <VolSlider label="ATM Vol" value={atmVol*100} min={5} max={120} step={0.5}
-                  onChange={v=>setAtmVol(v/100)} color="#38bdf8" format={v=>`${v.toFixed(1)}%`}
-                  hint="shift all"/>
+                  onChange={v=>setAtmVol(v/100)} color="#38bdf8" format={v=>`${v.toFixed(1)}%`}/>
                 <VolSlider label="Skew" value={skew*100} min={-30} max={15} step={0.5}
                   onChange={v=>setSkew(v/100)} color="#fb923c"
-                  format={v=>`${v>=0?"+":""}${v.toFixed(1)}%`}
-                  hint="put/call tilt"/>
+                  format={v=>`${v>=0?"+":""}${v.toFixed(1)}%`}/>
                 <VolSlider label="Convexity" value={convexity*100} min={0} max={80} step={0.5}
-                  onChange={v=>setConvexity(v/100)} color="#a78bfa" format={v=>`${v.toFixed(1)}%`}
-                  hint="wing curvature"/>
+                  onChange={v=>setConvexity(v/100)} color="#a78bfa" format={v=>`${v.toFixed(1)}%`}/>
               </div>
             </div>
 
@@ -2188,225 +2329,267 @@ export default function CCADesk() {
       {/* ════════════ FUTURES CURVE TAB ════════════ */}
       {tab===4 && (
         <div>
-          {/* ── Rate Sliders + Spread Generator ── */}
-          <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap",alignItems:"stretch"}}>
-
-            {/* Quarter rate sliders */}
-            <div className="panel" style={{flex:1,minWidth:320}}>
-              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:14}}>
-                2026 Quarterly Carry Rates
+          {/* ── STICKY HEADER: Per-month rates + spread toggle ── */}
+          <div style={{
+            position:"sticky",top:0,zIndex:20,
+            background:"#070b10",
+            borderBottom:"1px solid #182030",
+            paddingBottom:14,paddingTop:6,
+            marginBottom:16,
+          }}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase"}}>
+                Monthly Carry Rates &nbsp;<span style={{color:"#334155",fontWeight:400}}>— per contract override · Apr-26 → Dec-28</span>
               </div>
-              {quarterRates.map((rate,qi)=>{
-                const pct=((rate-0)/(15-0)*100).toFixed(1);
-                return (
-                  <div key={qi} style={{marginBottom:14}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <div style={{width:10,height:10,borderRadius:2,background:Q_COLORS[qi]}}/>
-                        <span style={{fontSize:9,color:Q_COLORS[qi],letterSpacing:"0.1em"}}>
-                          {Q_SHORT[qi]}
-                          <span style={{color:"#334155",marginLeft:6,fontSize:8}}>
-                            {qi===0?"Jan-Mar":qi===1?"Apr-Jun":qi===2?"Jul-Sep":"Oct-Dec"}
-                          </span>
-                        </span>
-                      </div>
-                      <span style={{fontSize:16,fontWeight:600,color:Q_COLORS[qi],fontFamily:"'IBM Plex Mono',monospace"}}>
-                        {rate.toFixed(2)}<span style={{fontSize:11,color:"#334155"}}>%</span>
-                      </span>
-                    </div>
-                    <input type="range" min={0} max={15} step={0.05} value={rate}
-                      onChange={e=>setQR(qi,parseFloat(e.target.value))}
-                      style={{width:"100%",background:`linear-gradient(to right,${Q_COLORS[qi]} ${pct}%,#182030 ${pct}%)`,accentColor:Q_COLORS[qi]}}
-                    />
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:7,color:"#1e2d3d",marginTop:2}}>
-                      <span>0%</span><span>15%</span>
-                    </div>
-                  </div>
-                );
-              })}
-              <div style={{borderTop:"1px solid #182030",paddingTop:12,marginTop:2}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                  <span style={{fontSize:9,color:"#64748b",letterSpacing:"0.1em"}}>2027+ Base Rate</span>
-                  <span style={{fontSize:16,fontWeight:600,color:"#64748b",fontFamily:"'IBM Plex Mono',monospace"}}>
-                    {baseRate.toFixed(2)}<span style={{fontSize:11,color:"#334155"}}>%</span>
-                  </span>
-                </div>
-                <input type="range" min={0} max={15} step={0.05} value={baseRate}
-                  onChange={e=>setBaseRate(parseFloat(e.target.value))}
-                  style={{width:"100%",background:`linear-gradient(to right,#64748b ${((baseRate/15)*100).toFixed(1)}%,#182030 ${((baseRate/15)*100).toFixed(1)}%)`,accentColor:"#64748b"}}
-                />
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:7,color:"#1e2d3d",marginTop:2}}>
-                  <span>0%</span><span>15%</span>
-                </div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <button onClick={()=>setMonthlyRates(WP_DEFAULT_MONTHLY_RATES)}
+                  style={{fontSize:8,color:"#334155",background:"transparent",border:"1px solid #182030",borderRadius:2,padding:"3px 10px",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace",letterSpacing:"0.08em"}}>
+                  RESET RATES
+                </button>
+                <button onClick={()=>setShowSpreadGen(s=>!s)} style={{
+                  fontSize:8,fontFamily:"'IBM Plex Mono',monospace",letterSpacing:"0.1em",
+                  padding:"4px 12px",borderRadius:2,cursor:"pointer",border:"1px solid",
+                  borderColor:showSpreadGen?"#34d399":"#182030",
+                  background:showSpreadGen?"rgba(52,211,153,0.08)":"transparent",
+                  color:showSpreadGen?"#34d399":"#475569",
+                  transition:"all 0.15s",
+                }}>
+                  {showSpreadGen?"▲ Hide Spread":"▼ Spread Generator"}
+                </button>
               </div>
             </div>
 
-            {/* Spread Generator */}
-            <div className="panel" style={{flex:1,minWidth:300}}>
-              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:14}}>
-                Spread Generator
-              </div>
-              {/* Leg selectors */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 32px 1fr",gap:8,alignItems:"center",marginBottom:16}}>
-                <div>
-                  <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:5}}>NEAR LEG</div>
-                  <select
-                    value={spreadNear}
-                    onChange={e=>setSpreadNear(e.target.value)}
-                    style={{width:"100%",background:"#0b0f18",border:"1px solid #182030",color:"#34d399",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,padding:"6px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}
-                  >
-                    {curve.filter(c=>c.isQExpiry||c.isAnchor).map(c=>(
-                      <option key={c.label} value={c.label}>{c.label}</option>
-                    ))}
-                  </select>
-                  {spreadNearData && (
-                    <div style={{fontSize:11,color:"#34d399",fontWeight:600,marginTop:4,textAlign:"center"}}>
-                      ${spreadNearData.price.toFixed(3)}
-                    </div>
-                  )}
+            {/* Per-month rate grid */}
+            {(()=>{
+              const allLabels = curveWithMonthlyRates.map(c=>c.label);
+              return (
+                <div style={{overflowX:"auto"}}>
+                  <div style={{display:"flex",gap:5,minWidth:"max-content",paddingBottom:4}}>
+                    {allLabels.map(label=>{
+                      const r = monthlyRates[label]??baseRate;
+                      const c = curveWithMonthlyRates.find(x=>x.label===label);
+                      const isQ = c?.isQExpiry;
+                      const isAnch = c?.isAnchor;
+                      const pct = ((r/15)*100).toFixed(1);
+                      const borderCol = isAnch?"#38bdf8":isQ?"#38bdf855":"#182030";
+                      return (
+                        <div key={label} style={{
+                          width:72,flexShrink:0,
+                          background:isAnch?"rgba(56,189,248,0.10)":isQ?"rgba(56,189,248,0.04)":"#0b0f18",
+                          border:`1px solid ${borderCol}`,
+                          borderRadius:3,padding:"6px 5px 5px",
+                          display:"flex",flexDirection:"column",gap:3,
+                        }}>
+                          {/* Label */}
+                          <div style={{fontSize:8,color:isAnch?"#38bdf8":isQ?"#7dd3fc":"#64748b",letterSpacing:"0.06em",textAlign:"center",fontWeight:isQ?700:400}}>
+                            {label}
+                          </div>
+                          {/* Large editable rate — click to edit inline */}
+                          <input
+                            type="number" step="0.05" min="0" max="25"
+                            value={r.toFixed(2)}
+                            onChange={e=>setMonthlyRate(label,parseFloat(e.target.value)||0)}
+                            style={{
+                              width:"100%",
+                              background:"transparent",
+                              border:"none",
+                              borderBottom:`1px solid ${isAnch?"#38bdf855":"#1e3a5f"}`,
+                              color:"#38bdf8",
+                              fontFamily:"'IBM Plex Mono',monospace",
+                              fontSize:14,fontWeight:700,
+                              textAlign:"center",outline:"none",
+                              padding:"2px 0 3px",
+                              cursor:"text",
+                              WebkitAppearance:"none",
+                            }}
+                          />
+                          {/* % label + nudge buttons */}
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:2}}>
+                            <button onClick={()=>setMonthlyRate(label,Math.max(0,parseFloat((r-0.25).toFixed(2))))}
+                              style={{flex:1,background:"#182030",border:"none",borderRadius:2,color:"#64748b",
+                                fontFamily:"'IBM Plex Mono',monospace",fontSize:11,fontWeight:700,
+                                cursor:"pointer",padding:"1px 0",lineHeight:1.2}}
+                              onMouseEnter={e=>{e.target.style.background="#1e3a5f";e.target.style.color="#38bdf8";}}
+                              onMouseLeave={e=>{e.target.style.background="#182030";e.target.style.color="#64748b";}}>
+                              −
+                            </button>
+                            <span style={{fontSize:8,color:"#334155"}}>%</span>
+                            <button onClick={()=>setMonthlyRate(label,Math.min(25,parseFloat((r+0.25).toFixed(2))))}
+                              style={{flex:1,background:"#182030",border:"none",borderRadius:2,color:"#64748b",
+                                fontFamily:"'IBM Plex Mono',monospace",fontSize:11,fontWeight:700,
+                                cursor:"pointer",padding:"1px 0",lineHeight:1.2}}
+                              onMouseEnter={e=>{e.target.style.background="#1e3a5f";e.target.style.color="#38bdf8";}}
+                              onMouseLeave={e=>{e.target.style.background="#182030";e.target.style.color="#64748b";}}>
+                              +
+                            </button>
+                          </div>
+                          {/* Mini fill bar */}
+                          <div style={{height:2,background:"#182030",borderRadius:1,overflow:"hidden"}}>
+                            <div style={{width:`${pct}%`,height:"100%",background:isAnch?"#38bdf8":"linear-gradient(90deg,#1e3a5f,#38bdf8)",borderRadius:1,minWidth:1,transition:"width 0.2s"}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div style={{textAlign:"center",fontSize:14,color:"#334155",fontWeight:600}}>/</div>
-                <div>
-                  <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:5}}>FAR LEG</div>
-                  <select
-                    value={spreadFar}
-                    onChange={e=>setSpreadFar(e.target.value)}
-                    style={{width:"100%",background:"#0b0f18",border:"1px solid #182030",color:"#f87171",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,padding:"6px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}
-                  >
-                    {curve.filter(c=>c.isQExpiry||c.isAnchor).map(c=>(
-                      <option key={c.label} value={c.label}>{c.label}</option>
-                    ))}
-                  </select>
-                  {spreadFarData && (
-                    <div style={{fontSize:11,color:"#f87171",fontWeight:600,marginTop:4,textAlign:"center"}}>
-                      ${spreadFarData.price.toFixed(3)}
-                    </div>
-                  )}
-                </div>
-              </div>
+              );
+            })()}
 
-              {/* Spread results */}
-              {spreadResult && (
-                <div style={{background:"#070b10",border:"1px solid #182030",borderRadius:3,padding:"12px 14px"}}>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                    <div>
-                      <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:3}}>SPREAD</div>
-                      <div style={{fontSize:22,fontWeight:600,color:spreadResult.spread>=0?"#34d399":"#f87171",fontFamily:"'IBM Plex Mono',monospace"}}>
-                        {spreadResult.spread>=0?"+":""}{spreadResult.spread.toFixed(3)}
-                      </div>
-                      <div style={{fontSize:8,color:"#334155",marginTop:1}}>USD / tCO2e</div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:3}}>ANNUALIZED RATE</div>
-                      <div style={{fontSize:22,fontWeight:600,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace"}}>
-                        {spreadResult.annualizedRate.toFixed(2)}<span style={{fontSize:13,color:"#334155"}}>%</span>
-                      </div>
-                      <div style={{fontSize:8,color:"#334155",marginTop:1}}>continuous carry</div>
-                    </div>
+            {/* Spread Generator — collapsible */}
+            {showSpreadGen&&(
+              <div style={{marginTop:12,background:"#0b0f18",border:"1px solid #182030",borderRadius:3,padding:"12px 14px"}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 32px 1fr 1fr",gap:8,alignItems:"end"}}>
+                  <div>
+                    <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:5}}>NEAR LEG</div>
+                    <select value={spreadNear} onChange={e=>setSpreadNear(e.target.value)}
+                      style={{width:"100%",background:"#070b10",border:"1px solid #182030",color:"#34d399",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}>
+                      {curveWithMonthlyRates.map(c=>(<option key={c.label} value={c.label}>{c.label} — ${c.price.toFixed(2)}</option>))}
+                    </select>
                   </div>
-                  <div style={{borderTop:"1px solid #182030",paddingTop:8,display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,alignItems:"center"}}>
-                    <div>
-                      <div style={{fontSize:7,color:"#334155",marginBottom:2}}>DAYS</div>
-                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>{spreadResult.days}d</div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:7,color:"#334155",marginBottom:2}}>SPREAD %</div>
-                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>
-                        {spreadResult.spreadPct>=0?"+":""}{spreadResult.spreadPct.toFixed(2)}%
+                  <div style={{textAlign:"center",fontSize:14,color:"#334155",fontWeight:600,paddingBottom:4}}>/</div>
+                  <div>
+                    <div style={{fontSize:8,color:"#334155",letterSpacing:"0.1em",marginBottom:5}}>FAR LEG</div>
+                    <select value={spreadFar} onChange={e=>setSpreadFar(e.target.value)}
+                      style={{width:"100%",background:"#070b10",border:"1px solid #182030",color:"#f87171",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,fontWeight:600,padding:"5px 8px",borderRadius:2,outline:"none",cursor:"pointer"}}>
+                      {curveWithMonthlyRates.map(c=>(<option key={c.label} value={c.label}>{c.label} — ${c.price.toFixed(2)}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    {spreadResult&&(
+                      <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                        <div>
+                          <div style={{fontSize:8,color:"#334155",marginBottom:2}}>SPREAD</div>
+                          <div style={{fontSize:18,fontWeight:700,color:spreadResult.spread>=0?"#34d399":"#f87171",fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                            {spreadResult.spread>=0?"+":""}{spreadResult.spread.toFixed(3)}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{fontSize:8,color:"#334155",marginBottom:2}}>ANN. RATE</div>
+                          <div style={{fontSize:18,fontWeight:700,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                            {spreadResult.annualizedRate.toFixed(2)}%
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{fontSize:8,color:"#334155",marginBottom:2}}>DAYS</div>
+                          <div style={{fontSize:14,fontWeight:600,color:"#94a3b8",fontFamily:"'IBM Plex Mono',monospace"}}>{spreadResult.days}d</div>
+                        </div>
+                        <button onClick={()=>{
+                          const time=new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+                          setFuturesBlotter(b=>[...b,{
+                            id:Date.now(),time,
+                            near:spreadNear,far:spreadFar,
+                            nearPrice:spreadNearData.price,farPrice:spreadFarData.price,
+                            spread:spreadResult.spread,spreadPct:spreadResult.spreadPct,
+                            annualizedRate:spreadResult.annualizedRate,days:spreadResult.days,
+                          }]);
+                        }} style={{
+                          background:"#34d399",border:"none",borderRadius:2,color:"#070b10",
+                          fontFamily:"'IBM Plex Mono',monospace",fontSize:9,fontWeight:700,
+                          letterSpacing:"0.1em",padding:"8px 12px",cursor:"pointer",
+                          textTransform:"uppercase",whiteSpace:"nowrap",marginTop:14,
+                        }}>+ Add</button>
                       </div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:7,color:"#334155",marginBottom:2}}>NEAR / FAR</div>
-                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>
-                        {spreadNear.slice(0,6)} / {spreadFar.slice(0,6)}
-                      </div>
-                    </div>
-                    <div style={{textAlign:"right"}}>
-                      <button onClick={()=>{
-                        const time=new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
-                        setFuturesBlotter(b=>[...b,{
-                          id:Date.now(), time,
-                          near:spreadNear, far:spreadFar,
-                          nearPrice:spreadNearData.price,
-                          farPrice:spreadFarData.price,
-                          spread:spreadResult.spread,
-                          spreadPct:spreadResult.spreadPct,
-                          annualizedRate:spreadResult.annualizedRate,
-                          days:spreadResult.days,
-                        }]);
-                      }} style={{
-                        background:"#34d399",border:"none",borderRadius:2,
-                        color:"#070b10",fontFamily:"'IBM Plex Mono',monospace",
-                        fontSize:9,fontWeight:700,letterSpacing:"0.1em",
-                        padding:"8px 12px",cursor:"pointer",textTransform:"uppercase",
-                        whiteSpace:"nowrap",
-                      }}>
-                        + Add
-                      </button>
-                    </div>
+                    )}
+                    {!spreadResult&&(
+                      <div style={{fontSize:9,color:"#1e2d3d",paddingTop:14}}>Select two contracts</div>
+                    )}
                   </div>
                 </div>
-              )}
-              {!spreadResult && (
-                <div style={{textAlign:"center",padding:"20px 0",fontSize:9,color:"#1e2d3d"}}>
-                  Select two different contracts to calculate spread
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* ── Curve Table ── */}
           <div style={{overflowX:"auto"}}>
-            {Object.entries(byYear).map(([year,months])=>{
-              const yr=parseInt(year);
-              return (
-                <div key={year} style={{marginBottom:18}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #182030",paddingBottom:5,marginBottom:3}}>
-                    <span style={{fontSize:10,fontWeight:600,color:yr===2026?"#38bdf8":"#475569",letterSpacing:"0.1em"}}>{year}</span>
-                    {yr===2026
-                      ?<span style={{fontSize:8,color:"#38bdf8",letterSpacing:"0.08em"}}>Q RATES:&nbsp;{quarterRates.map((rate,i)=><span key={i} style={{color:Q_COLORS[i]}}>{Q_SHORT[i]}:{rate.toFixed(2)}% </span>)}</span>
-                      :<span style={{fontSize:8,color:"#475569",letterSpacing:"0.07em"}}>BASE RATE {baseRate.toFixed(2)}%</span>
-                    }
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"100px 110px 36px 1fr 88px 82px",gap:"0 10px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",padding:"3px 8px",marginBottom:1}}>
-                    <span>Contract</span><span style={{textAlign:"right"}}>Price</span><span style={{textAlign:"center"}}>Qtr</span><span>Carry</span><span style={{textAlign:"right"}}>Rate</span><span style={{textAlign:"right"}}>vs Anchor</span>
-                  </div>
-                  {months.map(c=>{
-                    const bw=((c.price-minP)/pRange)*100;
-                    const diff=(c.price-anchorPrice)/anchorPrice*100;
-                    const qc=c.inAnchorYear?Q_COLORS[c.quarter]:"#475569";
-                    const isSpreadLeg=c.label===spreadNear||c.label===spreadFar;
-                    return (
-                      <div key={c.label} className="rh" style={{
-                        display:"grid",gridTemplateColumns:"100px 110px 36px 1fr 88px 82px",
-                        gap:"0 10px",alignItems:"center",padding:"5px 8px",borderBottom:"1px solid #090d12",
-                        background:c.isAnchor?"rgba(56,189,248,0.09)":isSpreadLeg?"rgba(52,211,153,0.05)":c.isQExpiry?"rgba(56,189,248,0.03)":"transparent",
-                        borderLeft:c.isAnchor?"2px solid #38bdf8":isSpreadLeg?"2px solid #34d399":c.isQExpiry?"2px solid #1a3050":"2px solid transparent",
-                      }}>
-                        <span style={{fontSize:11,fontWeight:c.isQExpiry?600:400,color:c.isAnchor?"#38bdf8":isSpreadLeg?"#34d399":c.isQExpiry?"#7dd3fc":"#4a5d70",letterSpacing:"0.04em"}}>
-                          {c.label}
-                          {c.isAnchor&&<span style={{fontSize:6,marginLeft:3,color:"#38bdf8"}}>●</span>}
-                          {c.isQExpiry&&!c.isAnchor&&<span style={{fontSize:6,marginLeft:3,color:"#7dd3fc55"}}>Q</span>}
-                        </span>
-                        <span style={{fontSize:12,fontWeight:600,color:c.isAnchor?"#38bdf8":"#d0dcea",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>${c.price.toFixed(3)}</span>
-                        <span style={{textAlign:"center",fontSize:7,fontWeight:700,color:qc}}>{c.inAnchorYear?Q_SHORT[c.quarter]:"—"}</span>
-                        <div style={{height:4,background:"#090d12",borderRadius:1,overflow:"hidden"}}>
-                          <div style={{width:`${bw}%`,height:"100%",minWidth:2,borderRadius:1,
-                            background:c.inAnchorYear?`linear-gradient(90deg,${qc}44,${qc})`:"linear-gradient(90deg,#1a2030,#2d3d50)"}}/>
+            {(()=>{
+              // Build a price lookup for Dec contracts
+              const decPrices = {};
+              curveWithMonthlyRates.forEach(c=>{
+                if(c.month===11) decPrices[c.year]=c.price;
+              });
+              // For a given contract, find next December at or after its date
+              function nextDecPrice(c) {
+                // If this IS December, use next December
+                const startYear = c.month===11 ? c.year+1 : c.year;
+                for(let y=startYear; y<=2028; y++) {
+                  if(decPrices[y]!==undefined) return {price:decPrices[y], year:y};
+                }
+                return null;
+              }
+              return Object.entries(byYear).map(([year,months])=>{
+                const yr=parseInt(year);
+                return (
+                  <div key={year} style={{marginBottom:18}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,borderBottom:"1px solid #182030",paddingBottom:5,marginBottom:3}}>
+                      <span style={{fontSize:10,fontWeight:600,color:yr===2026?"#38bdf8":"#475569",letterSpacing:"0.1em"}}>{year}</span>
+                      {yr===2026
+                        ?<span style={{fontSize:8,color:"#38bdf8",letterSpacing:"0.08em"}}>Q RATES:&nbsp;{quarterRates.map((rate,i)=><span key={i} style={{color:Q_COLORS[i]}}>{Q_SHORT[i]}:{rate.toFixed(2)}% </span>)}</span>
+                        :<span style={{fontSize:8,color:"#475569",letterSpacing:"0.07em"}}>BASE RATE {baseRate.toFixed(2)}%</span>
+                      }
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"100px 110px 36px 1fr 88px 82px",gap:"0 10px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",padding:"3px 8px",marginBottom:1}}>
+                      <span>Contract</span>
+                      <span style={{textAlign:"right"}}>Price</span>
+                      <span style={{textAlign:"center"}}>Qtr</span>
+                      <span>Dec Spread</span>
+                      <span style={{textAlign:"right"}}>Rate</span>
+                      <span style={{textAlign:"right"}}>vs Anchor</span>
+                    </div>
+                    {months.map(c=>{
+                      const diff=(c.price-anchorPrice)/anchorPrice*100;
+                      const qc=c.inAnchorYear?Q_COLORS[c.quarter]:"#475569";
+                      const isSpreadLeg=c.label===spreadNear||c.label===spreadFar;
+                      // Dec spread calc
+                      const nd = nextDecPrice(c);
+                      const decSpread = nd ? nd.price - c.price : null;
+                      const decLabel = nd ? `Dec-${String(nd.year).slice(2)}` : null;
+                      return (
+                        <div key={c.label} className="rh" style={{
+                          display:"grid",gridTemplateColumns:"100px 110px 36px 1fr 88px 82px",
+                          gap:"0 10px",alignItems:"center",padding:"5px 8px",borderBottom:"1px solid #090d12",
+                          background:c.isAnchor?"rgba(56,189,248,0.09)":isSpreadLeg?"rgba(52,211,153,0.05)":c.isQExpiry?"rgba(56,189,248,0.03)":"transparent",
+                          borderLeft:c.isAnchor?"2px solid #38bdf8":isSpreadLeg?"2px solid #34d399":c.isQExpiry?"2px solid #1a3050":"2px solid transparent",
+                        }}>
+                          <span style={{fontSize:11,fontWeight:c.isQExpiry?600:400,color:c.isAnchor?"#38bdf8":isSpreadLeg?"#34d399":c.isQExpiry?"#7dd3fc":"#4a5d70",letterSpacing:"0.04em"}}>
+                            {c.label}
+                            {c.isAnchor&&<span style={{fontSize:6,marginLeft:3,color:"#38bdf8"}}>●</span>}
+                            {c.isQExpiry&&!c.isAnchor&&<span style={{fontSize:6,marginLeft:3,color:"#7dd3fc55"}}>Q</span>}
+                          </span>
+                          <span style={{fontSize:12,fontWeight:600,color:c.isAnchor?"#38bdf8":"#d0dcea",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>${c.price.toFixed(3)}</span>
+                          <span style={{textAlign:"center",fontSize:7,fontWeight:700,color:qc}}>{c.inAnchorYear?Q_SHORT[c.quarter]:"—"}</span>
+                          {/* Dec spread column */}
+                          <div style={{display:"flex",flexDirection:"column",gap:1}}>
+                            {decSpread!==null && decLabel ? (
+                              <>
+                                <div style={{display:"flex",alignItems:"baseline",gap:4}}>
+                                  <span style={{fontSize:11,fontWeight:600,
+                                    color:decSpread>=0?"#34d399":"#f87171",
+                                    fontVariantNumeric:"tabular-nums"}}>
+                                    {decSpread>=0?"+":""}{decSpread.toFixed(3)}
+                                  </span>
+                                  <span style={{fontSize:7,color:"#334155",letterSpacing:"0.05em"}}>
+                                    {decLabel}/{c.label.slice(0,6)}
+                                  </span>
+                                </div>
+                              </>
+                            ) : (
+                              <span style={{fontSize:8,color:"#1e2d3d"}}>—</span>
+                            )}
+                          </div>
+                          <span style={{fontSize:9,color:"#38bdf8",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{c.effectiveRate.toFixed(2)}%</span>
+                          <span style={{fontSize:10,fontWeight:500,textAlign:"right",fontVariantNumeric:"tabular-nums",color:c.isAnchor?"#475569":diff>=0?"#34d399":"#f87171"}}>
+                            {c.isAnchor?"anchor":`${diff>=0?"+":""}${diff.toFixed(2)}%`}
+                          </span>
                         </div>
-                        <span style={{fontSize:9,color:qc,textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{c.effectiveRate.toFixed(2)}%</span>
-                        <span style={{fontSize:10,fontWeight:500,textAlign:"right",fontVariantNumeric:"tabular-nums",color:c.isAnchor?"#475569":diff>=0?"#34d399":"#f87171"}}>
-                          {c.isAnchor?"anchor":`${diff>=0?"+":""}${diff.toFixed(2)}%`}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
+                      );
+                    })}
+                  </div>
+                );
+              });
+            })()}
             <div style={{marginTop:16,borderTop:"1px solid #182030",paddingTop:9,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
-              <span>F(T) = P_anchor x exp(r x dt) - piecewise quarterly rates - continuous compounding - Apr-26 to Dec-28</span>
-              <span>Q = quarterly options expiry - anchor = Dec-26</span>
+              <span>F(T) = P_anchor x exp(r x dt) - per-month carry rates - continuous compounding - Apr-26 to Dec-28</span>
+              <span>Dec Spread = next December price minus contract price · Q = quarterly expiry · ● = anchor</span>
             </div>
           </div>
 
@@ -3090,6 +3273,642 @@ export default function CCADesk() {
                   : "Monthly settled — European Bachelier normal model, handles negative prices"}
               </span>
               <span>Strikes $20-$100 in $5 increments — adj = per-strike vol ±pp</span>
+            </div>
+          </div>
+        );
+      })()}
+
+            {/* ════════════ ACP PRICER TAB ════════════ */}
+      {tab===7 && (()=>{
+        const today = new Date();
+
+        function floorForYear(year) {
+          return acpFloorBase * Math.pow(1 + acpFloorGrowth/100, year - 2026);
+        }
+
+        // ── Bachelier ACP index pricer ─────────────────────────────────────────
+        // ACP Index = E[max(basis, K_floor − F_CCA)]
+        // Bachelier call on basis struck at floorBasis = K_floor − F_CCA
+        function acpIndex(basisMid, floorBasis, T, basisVol) {
+          if(T<=0||basisVol<=0) return Math.max(basisMid, floorBasis);
+          const sT = basisVol * Math.sqrt(T);
+          const d  = (basisMid - floorBasis) / sT;
+          return (basisMid - floorBasis)*normCDF(d) + sT*normPDF(d) + floorBasis;
+        }
+        function acpPFloor(basisMid, floorBasis, T, basisVol) {
+          if(T<=0||basisVol<=0) return basisMid<=floorBasis?1:0;
+          const d = (basisMid - floorBasis) / (basisVol*Math.sqrt(T));
+          return normCDF(-d);
+        }
+        // Delta: d(ACP)/d(F_CCA) — CCA moves floor basis by -1 per +1 CCA
+        // so d(ACP)/d(F) = -d(ACP)/d(floorBasis) = -N(-d) (negative: rising CCA reduces floor opt)
+        function acpDeltaCCA(basisMid, floorBasis, T, basisVol) {
+          if(T<=0||basisVol<=0) return floorBasis>=basisMid?1:0;
+          const d = (basisMid - floorBasis) / (basisVol*Math.sqrt(T));
+          return -normCDF(-d); // per $1 rise in CCA
+        }
+        // Vega: d(ACP)/d(basisVol)
+        function acpVega(basisMid, floorBasis, T, basisVol) {
+          if(T<=0||basisVol<=0) return 0;
+          const sT = basisVol*Math.sqrt(T);
+          const d = (basisMid - floorBasis) / sT;
+          return Math.sqrt(T) * normPDF(d);
+        }
+
+        // ── Selected contract ─────────────────────────────────────────────────
+        const selAcp = ACP_CONTRACTS.find(a=>a.label===acpSelContract)||ACP_CONTRACTS[0];
+        const selCcaData = expiryPriceMap[selAcp.deliveredCCA];
+        const selF = selCcaData?.price ?? anchorPrice;
+        const selK = floorForYear(selAcp.year);
+        const selFloorBasis = selK - selF;
+        const auctionDate = new Date(selAcp.year, selAcp.month, 15);
+        const selT = Math.max((auctionDate - today)/(365*24*3600*1000), 0.003);
+        const selBasisMid  = acpGetParam(selAcp.label,'basisMid', 0);
+        const selBasisVol  = acpGetParam(selAcp.label,'basisVol', 0.50);
+        const selMktBid    = acpGetParam(selAcp.label,'mktBid', null);
+        const selMktAsk    = acpGetParam(selAcp.label,'mktAsk', null);
+        const selIndexFair = acpIndex(selBasisMid, selFloorBasis, selT, selBasisVol);
+        const selPFloor    = acpPFloor(selBasisMid, selFloorBasis, selT, selBasisVol);
+        const selDelta     = acpDeltaCCA(selBasisMid, selFloorBasis, selT, selBasisVol);
+        const selVega      = acpVega(selBasisMid, selFloorBasis, selT, selBasisVol);
+        const selFloorOpt  = selIndexFair - selBasisMid;
+
+        // ── Scenario grid: CCA rows x BasisVol cols ───────────────────────────
+        // CCA range: ±$4 from current in $0.50 steps = 17 rows
+        const cca_steps = [];
+        for(let dF=-4; dF<=4; dF+=0.5) cca_steps.push(parseFloat((selF+dF).toFixed(2)));
+        // BasisVol cols: 0.10 to 2.00 in 0.20 steps = 10 cols
+        const vol_steps = [0.10,0.25,0.50,0.75,1.00,1.25,1.50,1.75,2.00];
+
+        // Color scale for index value: centered on fair value
+        function indexColor(val) {
+          const range = 1.5;
+          const t = Math.max(-1, Math.min(1, (val - selBasisMid) / range));
+          if(t > 0) {
+            const g = Math.round(52 + t*159);
+            return `rgb(30,${g},80)`;
+          } else {
+            const r = Math.round(180 - t*75);
+            return `rgb(${r},30,50)`;
+          }
+        }
+
+        return (
+          <div>
+            {/* ── Contract selector + floor controls ── */}
+            <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"stretch"}}>
+
+              {/* Contract picker */}
+              <div className="panel" style={{minWidth:260}}>
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                  ACP Contract
+                </div>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
+                  {ACP_CONTRACTS.map(a=>{
+                    const isSel=a.label===acpSelContract;
+                    const ccaD=expiryPriceMap[a.deliveredCCA];
+                    const fF=ccaD?.price??anchorPrice;
+                    const fK=floorForYear(a.year);
+                    return (
+                      <button key={a.label} onClick={()=>setAcpSelContract(a.label)} style={{
+                        padding:"4px 9px",fontFamily:"'IBM Plex Mono',monospace",fontSize:9,
+                        fontWeight:isSel?700:400,borderRadius:2,cursor:"pointer",border:"1px solid",
+                        borderColor:isSel?"#38bdf8":"#182030",
+                        background:isSel?"rgba(56,189,248,0.10)":"transparent",
+                        color:isSel?"#38bdf8":"#475569",transition:"all 0.12s",
+                      }}>
+                        <div>{a.label}</div>
+                        <div style={{fontSize:7,color:isSel?"#7dd3fc":"#334155",marginTop:1}}>
+                          {(fK-fF).toFixed(2)}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {/* Floor controls */}
+                <div style={{display:"flex",gap:8,alignItems:"center",borderTop:"1px solid #182030",paddingTop:8}}>
+                  <div>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:2}}>2026 Reserve Price</div>
+                    <div style={{display:"flex",alignItems:"center",gap:2}}>
+                      <span style={{fontSize:9,color:"#34d399"}}>$</span>
+                      <input type="number" step="0.01" value={acpFloorBase.toFixed(2)}
+                        onChange={e=>setAcpFloorBase(parseFloat(e.target.value)||27.94)}
+                        style={{background:"#070b10",border:"1px solid #34d39944",color:"#34d399",
+                          fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:700,
+                          width:70,outline:"none",borderRadius:2,padding:"2px 4px"}}/>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Growth/yr</div>
+                    <div style={{display:"flex",alignItems:"center",gap:2}}>
+                      <input type="number" step="0.1" value={acpFloorGrowth.toFixed(1)}
+                        onChange={e=>setAcpFloorGrowth(parseFloat(e.target.value)||7.5)}
+                        style={{background:"#070b10",border:"1px solid #a78bfa44",color:"#a78bfa",
+                          fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:700,
+                          width:52,outline:"none",borderRadius:2,padding:"2px 4px"}}/>
+                      <span style={{fontSize:9,color:"#a78bfa"}}>%</span>
+                    </div>
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:4}}>Floor schedule</div>
+                    {[2026,2027,2028].map(y=>(
+                      <div key={y} style={{display:"flex",justifyContent:"space-between",fontSize:8,marginBottom:1}}>
+                        <span style={{color:"#334155"}}>{y}</span>
+                        <span style={{color:"#34d399",fontFamily:"'IBM Plex Mono',monospace",fontWeight:600}}>${floorForYear(y).toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Live params for selected contract */}
+              <div className="panel" style={{minWidth:240}}>
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                  {selAcp.label} — Live Inputs
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  <div>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Basis Mid ($/t)</div>
+                    <input type="number" step="0.01" value={selBasisMid.toFixed(2)}
+                      onChange={e=>acpSetParam(selAcp.label,'basisMid',parseFloat(e.target.value)||0)}
+                      style={{background:"#070b10",border:"1px solid #38bdf844",color:"#38bdf8",
+                        fontFamily:"'IBM Plex Mono',monospace",fontSize:16,fontWeight:700,
+                        width:"100%",outline:"none",borderRadius:2,padding:"4px 6px"}}/>
+                    <div style={{fontSize:7,color:"#334155",marginTop:2}}>auction vs secondary</div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Basis Vol ($/t)</div>
+                    <input type="number" step="0.05" min="0.01" value={selBasisVol.toFixed(2)}
+                      onChange={e=>acpSetParam(selAcp.label,'basisVol',Math.max(0.01,parseFloat(e.target.value)||0.5))}
+                      style={{background:"#070b10",border:"1px solid #a78bfa44",color:"#a78bfa",
+                        fontFamily:"'IBM Plex Mono',monospace",fontSize:16,fontWeight:700,
+                        width:"100%",outline:"none",borderRadius:2,padding:"4px 6px"}}/>
+                    <div style={{fontSize:7,color:"#334155",marginTop:2}}>1σ of auction basis</div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Market Bid</div>
+                    <input type="number" step="0.01"
+                      value={selMktBid!=null?selMktBid:""}
+                      placeholder="—"
+                      onChange={e=>{const v=parseFloat(e.target.value);acpSetParam(selAcp.label,'mktBid',isNaN(v)?null:v);}}
+                      style={{background:"#070b10",border:"1px solid #34d39933",color:"#34d399",
+                        fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:600,
+                        width:"100%",outline:"none",borderRadius:2,padding:"3px 5px"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Market Ask</div>
+                    <input type="number" step="0.01"
+                      value={selMktAsk!=null?selMktAsk:""}
+                      placeholder="—"
+                      onChange={e=>{const v=parseFloat(e.target.value);acpSetParam(selAcp.label,'mktAsk',isNaN(v)?null:v);}}
+                      style={{background:"#070b10",border:"1px solid #f8717133",color:"#f87171",
+                        fontFamily:"'IBM Plex Mono',monospace",fontSize:14,fontWeight:600,
+                        width:"100%",outline:"none",borderRadius:2,padding:"3px 5px"}}/>
+                  </div>
+                </div>
+              </div>
+
+              {/* Key outputs */}
+              <div className="panel" style={{minWidth:260}}>
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                  {selAcp.label} — Index Fair Value
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:8,color:"#334155",marginBottom:4}}>ACP Index Fair</div>
+                  <div style={{fontSize:28,fontWeight:700,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",
+                    fontVariantNumeric:"tabular-nums",letterSpacing:"-0.02em"}}>
+                    {selIndexFair>=0?"+":""}{selIndexFair.toFixed(3)}
+                  </div>
+                  {selMktBid!=null&&selMktAsk!=null&&(
+                    <div style={{fontSize:10,color:"#475569",marginTop:3}}>
+                      Mkt: <span style={{color:"#34d399"}}>{selMktBid>=0?"+":""}{selMktBid.toFixed(2)}</span>
+                      <span style={{color:"#334155",margin:"0 4px"}}>/</span>
+                      <span style={{color:"#f87171"}}>{selMktAsk>=0?"+":""}{selMktAsk.toFixed(2)}</span>
+                      &nbsp;·&nbsp;
+                      <span style={{color:((selMktBid+selMktAsk)/2)>selIndexFair?"#f87171":"#34d399"}}>
+                        {((selMktBid+selMktAsk)/2)>selIndexFair?"RICH ":"CHEAP "}
+                        {Math.abs(((selMktBid+selMktAsk)/2)-selIndexFair).toFixed(3)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                  {[
+                    {label:"Floor Basis",val:`${selFloorBasis.toFixed(3)}`,sub:`K−F = ${selK.toFixed(2)}−${selF.toFixed(2)}`,color:selFloorBasis<-2?"#334155":selFloorBasis<-0.5?"#fb923c":"#f87171"},
+                    {label:"Floor Opt",val:`+${selFloorOpt.toFixed(3)}`,sub:"premium vs mid",color:"#fb923c"},
+                    {label:"P(floor hit)",val:`${(selPFloor*100).toFixed(1)}%`,sub:"P(auction fails)",color:selPFloor>0.15?"#f87171":selPFloor>0.05?"#fb923c":"#34d399"},
+                    {label:"Δ CCA",val:`${selDelta.toFixed(3)}`,sub:"$/t per $1 CCA",color:"#a78bfa"},
+                    {label:"Vega",val:`${selVega.toFixed(3)}`,sub:"$/t per $1 vol",color:"#a78bfa"},
+                    {label:"T (days)",val:`${(selT*365).toFixed(0)}d`,sub:selAcp.deliveredCCA,color:"#64748b"},
+                  ].map(({label,val,sub,color})=>(
+                    <div key={label} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"5px 7px"}}>
+                      <div style={{fontSize:7,color:"#334155",marginBottom:2}}>{label}</div>
+                      <div style={{fontSize:12,fontWeight:700,color,fontFamily:"'IBM Plex Mono',monospace"}}>{val}</div>
+                      <div style={{fontSize:7,color:"#1e2d3d",marginTop:1}}>{sub}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* ── Seller Perspective: BS Put on CCA at floor + implied vol ── */}
+            {(()=>{
+              // Seller view: ACP fair = CCA fwd + Put(F, K_floor, T, σ_CCA)
+              // The put premium is what the seller implicitly gives away
+              // Use CCA vol surface at floor strike
+              const sellerCcaVol = strikeVol(selK, selF, atmVol, skew, convexity, perStrikeAdj[Math.round(selK)]||0);
+              const sellerPutVal = bsPut(selF, selK, selT, r, sellerCcaVol);
+              // ACP fair from seller view: basis mid + floor put premium
+              const sellerAcpFair = selBasisMid + sellerPutVal;
+              // Put delta = -N(-d2), prob CCA < floor
+              const sd1 = selT>0&&sellerCcaVol>0 ? (Math.log(selF/selK)+0.5*sellerCcaVol*sellerCcaVol*selT)/(sellerCcaVol*Math.sqrt(selT)) : 0;
+              const sd2 = sd1 - sellerCcaVol*Math.sqrt(selT);
+              const sellerPFloor = normCDF(-sd2);
+              const sellerDelta  = -normCDF(-sd2); // put delta on CCA
+              // Implied CCA vol from buyer's Bachelier price
+              // solve: bsPut(F, K, T, r, σ) = selFloorOpt
+              // Newton-Raphson
+              function impliedCcaVol(targetPutVal, F, K, T, rr) {
+                if(targetPutVal<=0) return 0;
+                let s = 0.35;
+                for(let i=0;i<50;i++){
+                  const p = bsPut(F,K,T,rr,s);
+                  const v = bsVega(F,K,T,rr,s);
+                  if(Math.abs(v)<1e-10) break;
+                  const ds = (targetPutVal-p)/v;
+                  s = Math.max(0.001, s+ds);
+                  if(Math.abs(ds)<1e-6) break;
+                }
+                return s;
+              }
+              const impliedVol = impliedCcaVol(selFloorOpt, selF, selK, selT, r);
+              // Divergence between models
+              const modelDivergence = sellerAcpFair - selIndexFair;
+              // CCA vol scenario: put value across CCA vol range (10% to 80%)
+              const ccaVolSteps = [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45,0.50,0.55,0.60,0.70,0.80];
+
+              return (
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+
+                  {/* Seller model panel */}
+                  <div className="panel">
+                    <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:12}}>
+                      Seller View — BS Put on CCA at Floor
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+                      <div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Model</div>
+                        <div style={{fontSize:9,color:"#fb923c",lineHeight:1.6}}>
+                          ACP = basis mid<br/>
+                          + Put(F_CCA, K_floor, T, σ_CCA)<br/>
+                          <span style={{color:"#334155"}}>gives away floor put to buyer</span>
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:3}}>CCA Vol at Floor Strike</div>
+                        <div style={{fontSize:22,fontWeight:700,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace"}}>
+                          {(sellerCcaVol*100).toFixed(1)}%
+                        </div>
+                        <div style={{fontSize:8,color:"#334155",marginTop:2}}>
+                          from vol surface at K=${selK.toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:10}}>
+                      {[
+                        {label:"Floor Put",val:`$${sellerPutVal.toFixed(3)}`,color:"#fb923c"},
+                        {label:"ACP Fair",val:`${sellerAcpFair>=0?"+":""}${sellerAcpFair.toFixed(3)}`,color:"#38bdf8"},
+                        {label:"P(floor)",val:`${(sellerPFloor*100).toFixed(1)}%`,color:sellerPFloor>0.1?"#f87171":"#34d399"},
+                        {label:"Put Δ",val:`${sellerDelta.toFixed(3)}`,color:"#a78bfa"},
+                      ].map(({label,val,color})=>(
+                        <div key={label} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"5px 7px",textAlign:"center"}}>
+                          <div style={{fontSize:7,color:"#334155",marginBottom:2}}>{label}</div>
+                          <div style={{fontSize:11,fontWeight:700,color,fontFamily:"'IBM Plex Mono',monospace"}}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Put value across CCA vol */}
+                    <div style={{fontSize:7,color:"#334155",marginBottom:5,letterSpacing:"0.08em",textTransform:"uppercase"}}>
+                      Floor Put Value vs CCA Implied Vol
+                    </div>
+                    <div style={{overflowX:"auto"}}>
+                      <div style={{display:"flex",gap:3,minWidth:"max-content"}}>
+                        {ccaVolSteps.map(v=>{
+                          const pv = bsPut(selF, selK, selT, r, v);
+                          const isCurrentVol = Math.abs(v-sellerCcaVol)<0.025;
+                          const barH = Math.min(40, (pv/1.5)*40);
+                          return (
+                            <div key={v} style={{width:38,flexShrink:0,textAlign:"center"}}>
+                              <div style={{fontSize:8,fontWeight:isCurrentVol?700:400,
+                                color:isCurrentVol?"#fb923c":"#475569",marginBottom:2,fontVariantNumeric:"tabular-nums"}}>
+                                {pv.toFixed(3)}
+                              </div>
+                              <div style={{height:40,background:"#182030",borderRadius:2,display:"flex",alignItems:"flex-end",overflow:"hidden",marginBottom:2}}>
+                                <div style={{width:"100%",height:`${barH}px`,
+                                  background:isCurrentVol?"#fb923c":"#fb923c44",
+                                  borderRadius:"1px 1px 0 0",transition:"height 0.2s"}}/>
+                              </div>
+                              <div style={{fontSize:7,color:isCurrentVol?"#fb923c":"#334155"}}>
+                                {(v*100).toFixed(0)}%
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Model comparison + implied vol */}
+                  <div className="panel">
+                    <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:12}}>
+                      Model Comparison — Buyer vs Seller
+                    </div>
+
+                    {/* Side by side comparison */}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 4px 1fr",gap:"0 10px",marginBottom:14,alignItems:"start"}}>
+                      <div style={{background:"rgba(56,189,248,0.05)",border:"1px solid #38bdf822",borderRadius:3,padding:"10px 12px"}}>
+                        <div style={{fontSize:8,color:"#38bdf8",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:8,fontWeight:700}}>Buyer View</div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Model</div>
+                        <div style={{fontSize:9,color:"#475569",marginBottom:8}}>Bachelier call on basis</div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Index Fair</div>
+                        <div style={{fontSize:18,fontWeight:700,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8}}>
+                          {selIndexFair>=0?"+":""}{selIndexFair.toFixed(3)}
+                        </div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Floor Premium</div>
+                        <div style={{fontSize:12,fontWeight:600,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8}}>+{selFloorOpt.toFixed(3)}</div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Implied CCA Vol</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#a78bfa",fontFamily:"'IBM Plex Mono',monospace"}}>
+                          {impliedVol>0?(impliedVol*100).toFixed(1)+"%" : "—"}
+                        </div>
+                        <div style={{fontSize:7,color:"#334155",marginTop:2}}>from floor opt value</div>
+                      </div>
+                      <div style={{background:"#182030",alignSelf:"stretch"}}/>
+                      <div style={{background:"rgba(251,146,60,0.05)",border:"1px solid #fb923c22",borderRadius:3,padding:"10px 12px"}}>
+                        <div style={{fontSize:8,color:"#fb923c",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:8,fontWeight:700}}>Seller View</div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:3}}>Model</div>
+                        <div style={{fontSize:9,color:"#475569",marginBottom:8}}>BS put on CCA at floor</div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>ACP Fair</div>
+                        <div style={{fontSize:18,fontWeight:700,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8}}>
+                          {sellerAcpFair>=0?"+":""}{sellerAcpFair.toFixed(3)}
+                        </div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>Floor Put Value</div>
+                        <div style={{fontSize:12,fontWeight:600,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace",marginBottom:8}}>+{sellerPutVal.toFixed(3)}</div>
+                        <div style={{fontSize:7,color:"#334155",marginBottom:2}}>CCA Vol at Floor</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#a78bfa",fontFamily:"'IBM Plex Mono',monospace"}}>
+                          {(sellerCcaVol*100).toFixed(1)}%
+                        </div>
+                        <div style={{fontSize:7,color:"#334155",marginTop:2}}>from vol surface</div>
+                      </div>
+                    </div>
+
+                    {/* Divergence */}
+                    <div style={{background:"#070b10",border:`1px solid ${Math.abs(modelDivergence)>0.05?"#fb923c44":"#182030"}`,borderRadius:3,padding:"10px 14px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                        <div style={{fontSize:8,color:"#475569",letterSpacing:"0.1em",textTransform:"uppercase"}}>Model Divergence</div>
+                        <div style={{fontSize:16,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace",
+                          color:Math.abs(modelDivergence)<0.01?"#34d399":Math.abs(modelDivergence)<0.05?"#fb923c":"#f87171",
+                          fontVariantNumeric:"tabular-nums"}}>
+                          {modelDivergence>=0?"+":""}{modelDivergence.toFixed(4)}
+                        </div>
+                      </div>
+                      <div style={{fontSize:8,color:"#334155",lineHeight:1.6}}>
+                        {Math.abs(modelDivergence)<0.005
+                          ? <span style={{color:"#34d399"}}>✓ Models agree — CCA vol surface consistent with basis vol assumption</span>
+                          : modelDivergence>0
+                          ? <span>Seller model prices <span style={{color:"#fb923c"}}>+{modelDivergence.toFixed(4)} richer</span> than buyer model. CCA vol surface implies more floor value than basis vol suggests — seller should demand higher ACP price.</span>
+                          : <span>Buyer model prices <span style={{color:"#38bdf8"}}>{Math.abs(modelDivergence).toFixed(4)} richer</span> than seller model. Basis vol implies more floor value than CCA vol surface — buyer is paying up for floor optionality.</span>
+                        }
+                      </div>
+                      {impliedVol>0&&(
+                        <div style={{marginTop:8,padding:"6px 10px",background:"#0b0f18",borderRadius:2,fontSize:8,color:"#475569"}}>
+                          To reconcile: CCA vol surface needs to be at&nbsp;
+                          <span style={{color:"#a78bfa",fontWeight:700,fontFamily:"'IBM Plex Mono',monospace"}}>
+                            {(impliedVol*100).toFixed(1)}%
+                          </span>
+                          &nbsp;at K=${selK.toFixed(2)} for models to agree.
+                          Currently at <span style={{color:"#fb923c"}}>{(sellerCcaVol*100).toFixed(1)}%</span>.
+                          {Math.abs(impliedVol-sellerCcaVol)>0.005&&(
+                            <span> Difference: <span style={{color:impliedVol>sellerCcaVol?"#f87171":"#34d399",fontWeight:700}}>
+                              {impliedVol>sellerCcaVol?"vol surface too low — selling ACP gives away floor put too cheap":
+                               "vol surface too high — ACP buyers are overpaying for floor protection"}
+                            </span></span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── Scenario grid: CCA price (rows) × basis vol (cols) ── */}
+            <div className="panel" style={{marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+                <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase"}}>
+                  Scenario Matrix — ACP Index Fair Value
+                </div>
+                <div style={{fontSize:8,color:"#334155"}}>
+                  Rows: CCA futures ±$4 in $0.50 steps &nbsp;·&nbsp; Cols: Basis vol ($/t) &nbsp;·&nbsp;
+                  <span style={{color:"#38bdf8"}}>■</span> current params
+                </div>
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <div style={{minWidth:"max-content"}}>
+                  {/* Header row */}
+                  <div style={{display:"flex",gap:1,marginBottom:1}}>
+                    <div style={{width:68,flexShrink:0,fontSize:7,color:"#334155",padding:"4px 6px",textAlign:"right"}}>
+                      CCA \ Vol
+                    </div>
+                    {vol_steps.map(v=>(
+                      <div key={v} style={{width:68,flexShrink:0,fontSize:7,fontWeight:600,
+                        color:Math.abs(v-selBasisVol)<0.01?"#a78bfa":"#475569",
+                        padding:"4px 0",textAlign:"center",background:"#0b0f18",borderRadius:"2px 2px 0 0"}}>
+                        σ={v.toFixed(2)}
+                      </div>
+                    ))}
+                    <div style={{width:68,flexShrink:0,fontSize:7,color:"#334155",padding:"4px 0",textAlign:"center"}}>
+                      P(floor)
+                    </div>
+                    <div style={{width:58,flexShrink:0,fontSize:7,color:"#334155",padding:"4px 0",textAlign:"center"}}>
+                      Δ CCA
+                    </div>
+                  </div>
+
+                  {/* Data rows */}
+                  {cca_steps.map(ccaPrice=>{
+                    const fB = floorForYear(selAcp.year) - ccaPrice;
+                    const isCurrentRow = Math.abs(ccaPrice-selF)<0.26;
+                    return (
+                      <div key={ccaPrice} style={{display:"flex",gap:1,marginBottom:1}}>
+                        {/* CCA price label */}
+                        <div style={{
+                          width:68,flexShrink:0,padding:"5px 6px",textAlign:"right",
+                          background:isCurrentRow?"rgba(56,189,248,0.10)":"#0b0f18",
+                          borderRadius:"2px 0 0 2px",
+                          borderLeft:isCurrentRow?"2px solid #38bdf8":"2px solid transparent",
+                        }}>
+                          <div style={{fontSize:11,fontWeight:isCurrentRow?700:400,
+                            color:isCurrentRow?"#38bdf8":"#64748b",
+                            fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums"}}>
+                            ${ccaPrice.toFixed(2)}
+                          </div>
+                          <div style={{fontSize:7,color:fB<-2?"#334155":fB<-0.5?"#fb923c55":"#f8717155"}}>
+                            fb={fB.toFixed(2)}
+                          </div>
+                        </div>
+
+                        {/* Vol scenario cells */}
+                        {vol_steps.map(bVol=>{
+                          const val = acpIndex(selBasisMid, fB, selT, bVol);
+                          const isCurrentCell = isCurrentRow && Math.abs(bVol-selBasisVol)<0.01;
+                          const floorAdded = val - selBasisMid;
+                          const mktMid = selMktBid!=null&&selMktAsk!=null?(selMktBid+selMktAsk)/2:null;
+                          const isMktCell = mktMid!=null && Math.abs(val-mktMid)<0.03;
+                          return (
+                            <div key={bVol} style={{
+                              width:68,flexShrink:0,padding:"5px 4px",textAlign:"center",
+                              background:isCurrentCell?"rgba(56,189,248,0.15)":"#0b0f18",
+                              border:isCurrentCell?"1px solid #38bdf8":isMktCell?"1px solid #34d39966":"1px solid transparent",
+                              borderRadius:2,
+                            }}>
+                              <div style={{
+                                fontSize:11,fontWeight:isCurrentCell?700:500,
+                                color:isCurrentCell?"#38bdf8":val>0?"#34d399":val>-0.5?"#94a3b8":"#f87171",
+                                fontFamily:"'IBM Plex Mono',monospace",fontVariantNumeric:"tabular-nums",
+                              }}>
+                                {val>=0?"+":""}{val.toFixed(3)}
+                              </div>
+                              {floorAdded>0.005&&(
+                                <div style={{fontSize:7,color:"#fb923c66",marginTop:1}}>
+                                  +{floorAdded.toFixed(3)}f
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {/* P(floor) at current basis vol */}
+                        <div style={{width:68,flexShrink:0,padding:"5px 4px",textAlign:"center",background:"#0b0f18",borderRadius:2}}>
+                          <div style={{fontSize:11,fontWeight:500,fontVariantNumeric:"tabular-nums",
+                            color:acpPFloor(selBasisMid,fB,selT,selBasisVol)>0.15?"#f87171":
+                                  acpPFloor(selBasisMid,fB,selT,selBasisVol)>0.05?"#fb923c":"#34d399"}}>
+                            {(acpPFloor(selBasisMid,fB,selT,selBasisVol)*100).toFixed(1)}%
+                          </div>
+                        </div>
+
+                        {/* Delta CCA at current basis vol */}
+                        <div style={{width:58,flexShrink:0,padding:"5px 4px",textAlign:"center",background:"#0b0f18",borderRadius:2}}>
+                          <div style={{fontSize:11,fontWeight:500,color:"#a78bfa",fontVariantNumeric:"tabular-nums"}}>
+                            {acpDeltaCCA(selBasisMid,fB,selT,selBasisVol).toFixed(3)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{marginTop:8,display:"flex",gap:20,fontSize:7,color:"#334155"}}>
+                <span><span style={{color:"#38bdf8"}}>■</span> current CCA + vol</span>
+                <span><span style={{color:"#fb923c"}}>+Xf</span> = floor optionality premium</span>
+                <span>fb = floor basis (K_floor − CCA)</span>
+                <span>P(floor) = prob auction fails at current basis vol</span>
+                <span>Δ CCA = ACP sensitivity to $1 CCA move</span>
+              </div>
+            </div>
+
+            {/* ── All contracts summary ── */}
+            <div className="panel">
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:10}}>
+                All ACP Contracts — Current Index Fair Values
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <div style={{display:"grid",
+                  gridTemplateColumns:"72px 72px 68px 68px 68px 68px 60px 60px 80px 90px",
+                  gap:"0 6px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",
+                  padding:"4px 8px",borderBottom:"1px solid #1a2840",marginBottom:2,minWidth:740}}>
+                  <span>Contract</span><span>Delivers</span>
+                  <span style={{textAlign:"right"}}>CCA Fwd</span>
+                  <span style={{textAlign:"right"}}>Floor</span>
+                  <span style={{textAlign:"right"}}>Flr Basis</span>
+                  <span style={{textAlign:"right"}}>Index Fair</span>
+                  <span style={{textAlign:"right"}}>Flr Opt</span>
+                  <span style={{textAlign:"right"}}>P(Flr)</span>
+                  <span style={{textAlign:"right"}}>Mkt Bid/Ask</span>
+                  <span style={{textAlign:"right"}}>Rich/Cheap</span>
+                </div>
+                {ACP_CONTRACTS.map((acp,idx)=>{
+                  const ccaD=expiryPriceMap[acp.deliveredCCA];
+                  const F=ccaD?.price??anchorPrice;
+                  const K=floorForYear(acp.year);
+                  const fB=K-F;
+                  const ad=new Date(acp.year,acp.month,15);
+                  const T=Math.max((ad-today)/(365*24*3600*1000),0.003);
+                  const bMid=acpGetParam(acp.label,'basisMid',0);
+                  const bVol=acpGetParam(acp.label,'basisVol',0.50);
+                  const mBid=acpGetParam(acp.label,'mktBid',null);
+                  const mAsk=acpGetParam(acp.label,'mktAsk',null);
+                  const idxFair=acpIndex(bMid,fB,T,bVol);
+                  const pF=acpPFloor(bMid,fB,T,bVol);
+                  const flOpt=idxFair-bMid;
+                  const mMid=mBid!=null&&mAsk!=null?(mBid+mAsk)/2:null;
+                  const rc=mMid!=null?mMid-idxFair:null;
+                  const isSel=acp.label===acpSelContract;
+                  return (
+                    <div key={acp.label} onClick={()=>setAcpSelContract(acp.label)}
+                      className="rh" style={{
+                        display:"grid",
+                        gridTemplateColumns:"72px 72px 68px 68px 68px 68px 60px 60px 80px 90px",
+                        gap:"0 6px",alignItems:"center",padding:"6px 8px",
+                        borderBottom:"1px solid #0a0e14",cursor:"pointer",
+                        background:isSel?"rgba(56,189,248,0.08)":idx%2===0?"#0b0f18":"#090c14",
+                        borderLeft:isSel?"3px solid #38bdf8":"3px solid transparent",
+                        minWidth:740,
+                      }}>
+                      <div style={{fontSize:11,fontWeight:700,color:isSel?"#38bdf8":"#d0dcea"}}>{acp.label}</div>
+                      <div style={{fontSize:10,color:"#7dd3fc"}}>{acp.deliveredCCA}</div>
+                      <div style={{textAlign:"right",fontSize:11,color:"#94a3b8",fontVariantNumeric:"tabular-nums"}}>${F.toFixed(2)}</div>
+                      <div style={{textAlign:"right",fontSize:11,color:"#34d399",fontVariantNumeric:"tabular-nums"}}>${K.toFixed(2)}</div>
+                      <div style={{textAlign:"right",fontSize:11,fontVariantNumeric:"tabular-nums",
+                        color:fB<-3?"#334155":fB<-1?"#fb923c":"#f87171"}}>{fB.toFixed(3)}</div>
+                      <div style={{textAlign:"right",fontSize:12,fontWeight:700,color:"#38bdf8",fontVariantNumeric:"tabular-nums"}}>
+                        {idxFair>=0?"+":""}{idxFair.toFixed(3)}
+                      </div>
+                      <div style={{textAlign:"right",fontSize:10,color:"#fb923c",fontVariantNumeric:"tabular-nums"}}>
+                        {flOpt>0.001?`+${flOpt.toFixed(3)}`:"—"}
+                      </div>
+                      <div style={{textAlign:"right",fontSize:10,fontVariantNumeric:"tabular-nums",
+                        color:pF>0.15?"#f87171":pF>0.05?"#fb923c":"#34d399"}}>
+                        {(pF*100).toFixed(1)}%
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        {mBid!=null||mAsk!=null?(
+                          <span style={{fontSize:10,fontVariantNumeric:"tabular-nums"}}>
+                            <span style={{color:"#34d399"}}>{mBid!=null?(mBid>=0?"+":"")+mBid.toFixed(2):"—"}</span>
+                            <span style={{color:"#334155",margin:"0 2px"}}>/</span>
+                            <span style={{color:"#f87171"}}>{mAsk!=null?(mAsk>=0?"+":"")+mAsk.toFixed(2):"—"}</span>
+                          </span>
+                        ):(
+                          <span style={{fontSize:9,color:"#1e2d3d"}}>—</span>
+                        )}
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        {rc!=null?(
+                          <span style={{fontSize:11,fontWeight:600,color:rc>0?"#f87171":"#34d399",fontVariantNumeric:"tabular-nums"}}>
+                            {rc>=0?"+":""}{rc.toFixed(3)}
+                            <div style={{fontSize:7,color:"#334155"}}>{rc>0?"rich":"cheap"}</div>
+                          </span>
+                        ):<span style={{fontSize:9,color:"#1e2d3d"}}>—</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{marginTop:10,borderTop:"1px solid #182030",paddingTop:8,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:5,fontSize:8,color:"#182030",letterSpacing:"0.06em"}}>
+              <span>ACP Index = E[max(basis, K_floor−F_CCA)] — Bachelier call on basis struck at floor basis · basis vol in $/tonne</span>
+              <span>Based on ICE ACP contract spec — settlement at max(auction clear, CARB reserve price) delivered into next CCA future</span>
             </div>
           </div>
         );
