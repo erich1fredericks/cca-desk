@@ -1495,6 +1495,9 @@ function CCADesk({ fbData, syncStatus }) {
       };
     });
   },[anchorPrice,baseRate,vintageSpreads]);
+
+  // ── Spread calculator
+  const curveMap = useMemo(()=>{
     const m={};
     curveWithMonthlyRates.forEach(c=>{ m[c.label]={price:c.price,month:c.month,year:c.year}; });
     return m;
