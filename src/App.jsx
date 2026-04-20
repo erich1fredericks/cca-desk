@@ -1059,9 +1059,28 @@ export default function CCADesk() {
     {label:"Aug-28",month:7,year:2028,deliveredCCA:"Sep-28",deliveredMonth:8,deliveredYear:2028},
     {label:"Nov-28",month:10,year:2028,deliveredCCA:"Dec-28",deliveredMonth:11,deliveredYear:2028},
   ];
+
+  // Helper: get Nth weekday of a month (1=Mon...5=Fri, n=1,2,3...)
+  function nthWeekday(year, month, weekday, n) {
+    const d = new Date(year, month, 1);
+    let count = 0;
+    while(true) {
+      if(d.getDay()===weekday) { count++; if(count===n) return new Date(d); }
+      d.setDate(d.getDate()+1);
+    }
+  }
+  // Default auction date = 3rd Wednesday of auction month
+  function defaultAuctionDate(acp) {
+    return nthWeekday(acp.year, acp.month, 3, 3); // 3rd Wednesday
+  }
+  // CCA put expiry = 3rd Friday of delivery month
+  function ccaPutExpiry(acp) {
+    return nthWeekday(acp.deliveredYear, acp.deliveredMonth, 5, 3); // 3rd Friday
+  }
+
   const [acpFloorBase,setAcpFloorBase]       = useState(()=>lsGet('acp_floorBase',27.94));
   const [acpFloorGrowth,setAcpFloorGrowth]   = useState(()=>lsGet('acp_floorGrowth',7.5));
-  // Per-contract: { basis (mid), basisVol ($/tonne), marketBid, marketAsk }
+  // Per-contract params including optional auction date override (YYYY-MM-DD string)
   const [acpParams,setAcpParams]             = useState(()=>lsGet('acp_params',{}));
   const [acpSelContract,setAcpSelContract]   = useState("May-26");
 
@@ -1070,6 +1089,15 @@ export default function CCADesk() {
   }
   function acpSetParam(label, key, val) {
     setAcpParams(p=>({...p,[label]:{...(p[label]||{}), [key]:val}}));
+  }
+  // Get effective auction date: use override if set, else default
+  function getAuctionDate(acp) {
+    const override = acpGetParam(acp.label,'auctionDateStr',null);
+    if(override) {
+      const d = new Date(override);
+      if(!isNaN(d.getTime())) return d;
+    }
+    return defaultAuctionDate(acp);
   }
 
   function wpOptVol(K, F) {
@@ -3340,22 +3368,34 @@ export default function CCADesk() {
         const ccaFwdData= expiryPriceMap[selAcp.deliveredCCA];
         const selF      = ccaFwdData?.price ?? anchorPrice;
         const selK      = floorForYear(selAcp.year);
-        const selADate  = new Date(selAcp.year, selAcp.month, 15);
-        const selT      = Math.max((selADate - today)/(365*24*3600*1000), 0.003);
-        // CCA vol at the floor strike from vol surface
+        // T_ACP = time to auction settlement (the correct T for pricing)
+        const selAuctionDate = getAuctionDate(selAcp);
+        const selTacp   = Math.max((selAuctionDate - today)/(365*24*3600*1000), 0.003);
+        // T_put = time to CCA put expiry (3rd Friday of delivery month) — longer
+        const selPutExpiry = ccaPutExpiry(selAcp);
+        const selTput   = Math.max((selPutExpiry - today)/(365*24*3600*1000), 0.003);
+        // Time difference in days
+        const selTdiffDays = Math.round((selTput - selTacp)*365);
+        // Format dates for display
+        const fmtDate = d => d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+        // CCA vol at floor strike from vol surface
         const selSigma  = strikeVol(selK, selF, atmVol, skew, convexity, perStrikeAdj[Math.round(selK)]||0);
-        // Model put fair value
-        const selPutFair= acpPutFair(selF, selK, selT, selSigma);
-        const selDelta  = acpPutDelta(selF, selK, selT, selSigma);
-        const selVegaV  = acpPutVega(selF, selK, selT, selSigma);
-        const selPFloor = acpPFloor(selF, selK, selT, selSigma);
+        // Model using T_ACP (correct)
+        const selPutFair    = acpPutFair(selF, selK, selTacp, selSigma);
+        // Model using T_put (incorrect — for comparison)
+        const selPutFairPut = acpPutFair(selF, selK, selTput, selSigma);
+        const selTimePremium = selPutFairPut - selPutFair; // extra value if using wrong T
+        const selDelta  = acpPutDelta(selF, selK, selTacp, selSigma);
+        const selVegaV  = acpPutVega(selF, selK, selTacp, selSigma);
+        const selPFloor = acpPFloor(selF, selK, selTacp, selSigma);
         // Market bid/ask
         const selMktBid = acpGetParam(selAcp.label,'mktBid', null);
         const selMktAsk = acpGetParam(selAcp.label,'mktAsk', null);
         const selMktMid = selMktBid!=null&&selMktAsk!=null ? (selMktBid+selMktAsk)/2 : null;
-        // Implied vol from market mid
-        const selImpVol = selMktMid!=null ? impliedVol(selMktMid, selF, selK, selT) : null;
-        // Rich/cheap: if market mid > put fair, buyer is collecting MORE than fair = good for buyer
+        // Implied vol using correct T_ACP
+        const selImpVol = selMktMid!=null ? impliedVol(selMktMid, selF, selK, selTacp) : null;
+        // Implied vol using wrong T_put (for comparison)
+        const selImpVolPut = selMktMid!=null ? impliedVol(selMktMid, selF, selK, selTput) : null;
         const selRC     = selMktMid!=null ? selMktMid - selPutFair : null;
 
         // ── Scenario grids ─────────────────────────────────────────────────────
@@ -3458,7 +3498,8 @@ export default function CCADesk() {
                     {label:"Vega",val:selVegaV.toFixed(3),color:"#a78bfa"},
                     {label:"P(ITM / loss)",val:`${(selPFloor*100).toFixed(1)}%`,
                      color:selPFloor>0.15?"#f87171":selPFloor>0.05?"#fb923c":"#34d399"},
-                    {label:"T",val:`${(selT*365).toFixed(0)}d`,color:"#64748b"},
+                    {label:"T_ACP (auction)",val:`${(selTacp*365).toFixed(0)}d`,color:"#38bdf8"},
+                    {label:"T_put (CCA exp)",val:`${(selTput*365).toFixed(0)}d`,color:"#64748b"},
                   ].map(({label,val,color})=>(
                     <div key={label} style={{background:"#070b10",border:"1px solid #182030",borderRadius:2,padding:"5px 7px"}}>
                       <div style={{fontSize:7,color:"#334155",marginBottom:1}}>{label}</div>
@@ -3548,6 +3589,107 @@ export default function CCADesk() {
               </div>
             </div>
 
+            {/* ── Timing panel: auction date vs CCA put expiry ── */}
+            <div className="panel" style={{marginBottom:14}}>
+              <div style={{fontSize:8,letterSpacing:"0.14em",color:"#475569",textTransform:"uppercase",marginBottom:12}}>
+                Timing Risk — {selAcp.label} Auction vs {selAcp.deliveredCCA} Put Expiry
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"280px 1fr 1fr 1fr",gap:14,alignItems:"start"}}>
+
+                {/* Auction date editor */}
+                <div>
+                  <div style={{fontSize:7,color:"#334155",marginBottom:4}}>Auction Settlement Date</div>
+                  <input type="date"
+                    value={acpGetParam(selAcp.label,'auctionDateStr', selAuctionDate.toISOString().slice(0,10))}
+                    onChange={e=>acpSetParam(selAcp.label,'auctionDateStr',e.target.value)}
+                    style={{width:"100%",background:"#070b10",border:"1px solid #38bdf844",color:"#38bdf8",
+                      fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:600,
+                      outline:"none",borderRadius:2,padding:"5px 8px"}}/>
+                  <div style={{fontSize:7,color:"#334155",marginTop:3}}>
+                    Default: 3rd Wed · {fmtDate(defaultAuctionDate(selAcp))}
+                  </div>
+                  <div style={{marginTop:8,display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                    <div style={{background:"#070b10",border:"1px solid #38bdf833",borderRadius:2,padding:"6px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:7,color:"#38bdf8",marginBottom:2}}>ACP Settles</div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace"}}>{fmtDate(selAuctionDate)}</div>
+                      <div style={{fontSize:9,color:"#334155",marginTop:1}}>T = {(selTacp*365).toFixed(0)}d</div>
+                    </div>
+                    <div style={{background:"#070b10",border:"1px solid #47556933",borderRadius:2,padding:"6px 8px",textAlign:"center"}}>
+                      <div style={{fontSize:7,color:"#475569",marginBottom:2}}>Put Expires</div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#64748b",fontFamily:"'IBM Plex Mono',monospace"}}>{fmtDate(selPutExpiry)}</div>
+                      <div style={{fontSize:9,color:"#334155",marginTop:1}}>T = {(selTput*365).toFixed(0)}d</div>
+                    </div>
+                  </div>
+                  <div style={{marginTop:6,background:"#0b0f18",border:"1px solid #fb923c33",borderRadius:2,padding:"5px 8px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:8,color:"#475569"}}>ACP settles before put by</span>
+                    <span style={{fontSize:13,fontWeight:700,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace"}}>{selTdiffDays}d</span>
+                  </div>
+                </div>
+
+                {/* Put value comparison */}
+                <div>
+                  <div style={{fontSize:7,color:"#334155",marginBottom:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>Put Value — Timing Impact</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                    <div style={{background:"#070b10",border:"1px solid #38bdf833",borderRadius:2,padding:"6px 10px"}}>
+                      <div style={{fontSize:7,color:"#38bdf8",marginBottom:2}}>Using T_ACP — correct</div>
+                      <div style={{fontSize:18,fontWeight:700,color:"#38bdf8",fontFamily:"'IBM Plex Mono',monospace"}}>{selPutFair.toFixed(4)}</div>
+                    </div>
+                    <div style={{background:"#070b10",border:"1px solid #33415533",borderRadius:2,padding:"6px 10px"}}>
+                      <div style={{fontSize:7,color:"#475569",marginBottom:2}}>Using T_put — overstated</div>
+                      <div style={{fontSize:18,fontWeight:700,color:"#64748b",fontFamily:"'IBM Plex Mono',monospace"}}>{selPutFairPut.toFixed(4)}</div>
+                    </div>
+                    <div style={{background:"#070b10",border:"1px solid #fb923c33",borderRadius:2,padding:"6px 10px"}}>
+                      <div style={{fontSize:7,color:"#fb923c",marginBottom:2}}>Overstatement</div>
+                      <div style={{fontSize:18,fontWeight:700,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace"}}>+{selTimePremium.toFixed(4)}</div>
+                      <div style={{fontSize:8,color:"#334155",marginTop:1}}>{(selTimePremium/Math.max(selPutFair,0.0001)*100).toFixed(1)}% of fair value</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Implied vol comparison */}
+                <div>
+                  <div style={{fontSize:7,color:"#334155",marginBottom:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>Implied Vol — Timing Effect</div>
+                  {selMktMid!=null&&selImpVol!=null ? (
+                    <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                      <div style={{background:"#070b10",border:"1px solid #a78bfa33",borderRadius:2,padding:"6px 10px"}}>
+                        <div style={{fontSize:7,color:"#a78bfa",marginBottom:2}}>Implied vol (T_ACP) — true</div>
+                        <div style={{fontSize:18,fontWeight:700,color:"#a78bfa",fontFamily:"'IBM Plex Mono',monospace"}}>{(selImpVol*100).toFixed(1)}%</div>
+                      </div>
+                      <div style={{background:"#070b10",border:"1px solid #33415533",borderRadius:2,padding:"6px 10px"}}>
+                        <div style={{fontSize:7,color:"#475569",marginBottom:2}}>Implied vol (T_put) — understated</div>
+                        <div style={{fontSize:18,fontWeight:700,color:"#64748b",fontFamily:"'IBM Plex Mono',monospace"}}>{selImpVolPut!=null?(selImpVolPut*100).toFixed(1)+"%" : "—"}</div>
+                      </div>
+                      <div style={{background:"#070b10",border:"1px solid #fb923c33",borderRadius:2,padding:"6px 10px"}}>
+                        <div style={{fontSize:7,color:"#fb923c",marginBottom:2}}>Vol understatement</div>
+                        <div style={{fontSize:18,fontWeight:700,color:"#fb923c",fontFamily:"'IBM Plex Mono',monospace"}}>
+                          {selImpVolPut!=null?`+${((selImpVol-selImpVolPut)*100).toFixed(1)}pp`:"—"}
+                        </div>
+                        <div style={{fontSize:8,color:"#334155",marginTop:1}}>true vol is higher</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{fontSize:9,color:"#1e2d3d",padding:"10px 0"}}>Enter market bid/ask to see implied vol comparison</div>
+                  )}
+                </div>
+
+                {/* Summary interpretation */}
+                <div>
+                  <div style={{fontSize:7,color:"#334155",marginBottom:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>Interpretation</div>
+                  <div style={{fontSize:9,color:"#475569",lineHeight:1.8}}>
+                    <div style={{marginBottom:8,padding:"6px 8px",background:"#070b10",border:"1px solid #182030",borderRadius:2}}>
+                      <span style={{color:"#38bdf8",fontWeight:700}}>The ACP buyer is short a {(selTacp*365).toFixed(0)}-day put</span>, not a {(selTput*365).toFixed(0)}-day put. The auction settles {selTdiffDays} days before the CCA option expires.
+                    </div>
+                    <div style={{marginBottom:8,padding:"6px 8px",background:"#070b10",border:"1px solid #182030",borderRadius:2}}>
+                      <span style={{color:"#fb923c",fontWeight:700}}>Pricing with T_put overstates</span> the fair put value by ${selTimePremium.toFixed(4)} — the buyer appears to be receiving less premium than they deserve, but they are actually being correctly compensated for a shorter-dated put.
+                    </div>
+                    <div style={{padding:"6px 8px",background:"#070b10",border:"1px solid #182030",borderRadius:2}}>
+                      <span style={{color:"#a78bfa",fontWeight:700}}>For implied vol:</span> always use T_ACP to back out the true implied vol. Using T_put systematically understates implied vol and makes the market appear to be pricing more floor risk than it actually is.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* ── Scenario matrix: put value grid ── */}
             <div className="panel" style={{marginBottom:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
@@ -3591,7 +3733,7 @@ export default function CCADesk() {
                     const isCurRow   = Math.abs(cca-selF)<0.5;
                     const belowFloor = cca < selK;
                     const intrinsic  = Math.max(0, selK-cca); // put intrinsic at this CCA
-                    const pITM       = acpPFloor(cca, selK, selT, selSigma);
+                    const pITM       = acpPFloor(cca, selK, selTacp, selSigma);
                     return (
                       <div key={cca} style={{display:"flex",gap:1,marginBottom:1}}>
                         {/* CCA label */}
@@ -3617,7 +3759,7 @@ export default function CCADesk() {
 
                         {/* Put value cells */}
                         {volCols.map(vol=>{
-                          const pv = acpPutFair(cca, selK, selT, vol);
+                          const pv = acpPutFair(cca, selK, selTacp, vol);
                           const isCurCell = isCurRow && Math.abs(vol-selSigma)<0.025;
                           const isMktCell = selMktMid!=null && Math.abs(pv-selMktMid)<0.005 && Math.abs(vol-selSigma)<0.025;
                           // Color: put value scale — deeper red = more valuable put = worse for buyer
@@ -3677,15 +3819,17 @@ export default function CCADesk() {
               </div>
               <div style={{overflowX:"auto"}}>
                 <div style={{display:"grid",
-                  gridTemplateColumns:"72px 68px 62px 62px 62px 72px 60px 60px 80px 80px 80px",
-                  gap:"0 6px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",
-                  padding:"4px 8px",borderBottom:"1px solid #1a2840",marginBottom:2,minWidth:780}}>
+                  gridTemplateColumns:"72px 68px 62px 62px 62px 72px 55px 55px 50px 60px 80px 80px 80px",
+                  gap:"0 5px",fontSize:7,color:"#2d3d50",letterSpacing:"0.1em",textTransform:"uppercase",
+                  padding:"4px 8px",borderBottom:"1px solid #1a2840",marginBottom:2,minWidth:880}}>
                   <span>ACP</span><span>Delivers</span>
                   <span style={{textAlign:"right"}}>CCA Fwd</span>
                   <span style={{textAlign:"right"}}>Floor</span>
                   <span style={{textAlign:"right"}}>OTM%</span>
                   <span style={{textAlign:"right"}}>Put Fair</span>
-                  <span style={{textAlign:"right"}}>P(ITM)</span>
+                  <span style={{textAlign:"right"}}>T_ACP</span>
+                  <span style={{textAlign:"right"}}>T_put</span>
+                  <span style={{textAlign:"right"}}>Gap</span>
                   <span style={{textAlign:"right"}}>Vol@K</span>
                   <span style={{textAlign:"right"}}>Mkt Bid/Ask</span>
                   <span style={{textAlign:"right"}}>Imp Vol</span>
@@ -3695,15 +3839,18 @@ export default function CCADesk() {
                   const cD=expiryPriceMap[acp.deliveredCCA];
                   const F=cD?.price??anchorPrice;
                   const K=floorForYear(acp.year);
-                  const ad=new Date(acp.year,acp.month,15);
-                  const T=Math.max((ad-today)/(365*24*3600*1000),0.003);
+                  const aDate=getAuctionDate(acp);
+                  const pDate=ccaPutExpiry(acp);
+                  const Tacp=Math.max((aDate-today)/(365*24*3600*1000),0.003);
+                  const Tput=Math.max((pDate-today)/(365*24*3600*1000),0.003);
+                  const gapDays=Math.round((Tput-Tacp)*365);
                   const sig=strikeVol(K,F,atmVol,skew,convexity,perStrikeAdj[Math.round(K)]||0);
-                  const putFair=acpPutFair(F,K,T,sig);
-                  const pITM=acpPFloor(F,K,T,sig);
+                  const putFair=acpPutFair(F,K,Tacp,sig);
+                  const pITM=acpPFloor(F,K,Tacp,sig);
                   const mBid=acpGetParam(acp.label,'mktBid',null);
                   const mAsk=acpGetParam(acp.label,'mktAsk',null);
                   const mMid=mBid!=null&&mAsk!=null?(mBid+mAsk)/2:null;
-                  const iVol=mMid!=null?impliedVol(mMid,F,K,T):null;
+                  const iVol=mMid!=null?impliedVol(mMid,F,K,Tacp):null;
                   const rc=mMid!=null?mMid-putFair:null;
                   const isSel=acp.label===acpSelContract;
                   const otm=((F/K-1)*100);
@@ -3711,12 +3858,12 @@ export default function CCADesk() {
                     <div key={acp.label} onClick={()=>setAcpSelContract(acp.label)}
                       className="rh" style={{
                         display:"grid",
-                        gridTemplateColumns:"72px 68px 62px 62px 62px 72px 60px 60px 80px 80px 80px",
-                        gap:"0 6px",alignItems:"center",padding:"6px 8px",
+                        gridTemplateColumns:"72px 68px 62px 62px 62px 72px 55px 55px 50px 60px 80px 80px 80px",
+                        gap:"0 5px",alignItems:"center",padding:"6px 8px",
                         borderBottom:"1px solid #0a0e14",cursor:"pointer",
                         background:isSel?"rgba(56,189,248,0.08)":idx%2===0?"#0b0f18":"#090c14",
                         borderLeft:isSel?"3px solid #38bdf8":"3px solid transparent",
-                        minWidth:780,
+                        minWidth:880,
                       }}>
                       <div style={{fontSize:11,fontWeight:700,color:isSel?"#38bdf8":"#d0dcea"}}>{acp.label}</div>
                       <div style={{fontSize:10,color:"#7dd3fc"}}>{acp.deliveredCCA}</div>
@@ -3728,10 +3875,9 @@ export default function CCADesk() {
                       <div style={{textAlign:"right",fontSize:12,fontWeight:700,color:"#38bdf8",fontVariantNumeric:"tabular-nums"}}>
                         {putFair.toFixed(4)}
                       </div>
-                      <div style={{textAlign:"right",fontSize:10,fontVariantNumeric:"tabular-nums",
-                        color:pITM>0.15?"#f87171":pITM>0.05?"#fb923c":"#34d399"}}>
-                        {(pITM*100).toFixed(1)}%
-                      </div>
+                      <div style={{textAlign:"right",fontSize:10,color:"#38bdf8",fontVariantNumeric:"tabular-nums"}}>{(Tacp*365).toFixed(0)}d</div>
+                      <div style={{textAlign:"right",fontSize:10,color:"#64748b",fontVariantNumeric:"tabular-nums"}}>{(Tput*365).toFixed(0)}d</div>
+                      <div style={{textAlign:"right",fontSize:10,color:"#fb923c",fontVariantNumeric:"tabular-nums"}}>+{gapDays}d</div>
                       <div style={{textAlign:"right",fontSize:10,color:"#fb923c",fontVariantNumeric:"tabular-nums"}}>
                         {(sig*100).toFixed(1)}%
                       </div>
